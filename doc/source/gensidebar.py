@@ -106,6 +106,7 @@ def generate_sidebar(conf, conf_api):
     write('Object Management', 'tutorials/object')
     write('Virtual Filesystem', 'tutorials/vfs')
     write('Configuration Parameters', 'tutorials/config')
+    write('Negative and Real Domains', 'tutorials/neg-real')
     endl()
 
     toctree('Tutorials – Advanced')
