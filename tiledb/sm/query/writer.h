@@ -33,6 +33,7 @@
 #ifndef TILEDB_WRITER_H
 #define TILEDB_WRITER_H
 
+#include "tiledb/rest/capnp/tiledb-rest.capnp.h"
 #include "tiledb/sm/array_schema/array_schema.h"
 #include "tiledb/sm/fragment/fragment_metadata.h"
 #include "tiledb/sm/misc/status.h"
@@ -40,6 +41,7 @@
 #include "tiledb/sm/query/types.h"
 #include "tiledb/sm/tile/tile.h"
 
+#include <capnp/message.h>
 #include <memory>
 #include <set>
 
@@ -134,8 +136,21 @@ class Writer {
    */
   AttributeBuffer buffer(const std::string& attribute) const;
 
+  /**
+   * Serialize a writer to capnp format
+   * @return unique_prt with capnp message;
+   */
+  Status capnp(::Writer::Builder* writerBuilder) const;
+
   /** Finalizes the reader. */
   Status finalize();
+
+  /**
+   * Deserialize from a capnp message
+   * @param writerBuilder
+   * @return
+   */
+  Status from_capnp(::Writer::Reader* writeReader);
 
   /** Initializes the writer. */
   Status init();

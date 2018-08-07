@@ -41,6 +41,7 @@
 #include "tiledb/sm/storage_manager/storage_manager.h"
 #include "tiledb/sm/tile/tile_io.h"
 
+#include <tiledb/rest/capnp/tiledb-rest.capnp.h>
 #include <iostream>
 #include <sstream>
 
@@ -89,10 +90,94 @@ AttributeBuffer Writer::buffer(const std::string& attribute) const {
   return attrbuf->second;
 }
 
+Status Writer::capnp(::Writer::Builder* writerBuilder) const {
+  STATS_FUNC_IN(serialization_writer_capnp);
+  ::GlobalWriteState::Builder globalWriteStateBuilder =
+      writerBuilder->initGlobalWriteState();
+  if (global_write_state_ != nullptr) {
+    ::MapInt64::Builder cellsWriterBuilder =
+        globalWriteStateBuilder.initCellsWritten();
+    auto cellsWritenEntries = cellsWriterBuilder.initEntries(
+        global_write_state_->cells_written_.size());
+    size_t i = 0;
+    for (auto it : global_write_state_->cells_written_) {
+      auto entry = cellsWritenEntries[i];
+      entry.setKey(it.first);
+      entry.setValue(it.second);
+      i++;
+    }
+
+    ::Map<capnp::Text, ::capnp::List<::Tile>>::Builder lastTilesBuilder =
+        globalWriteStateBuilder.initLastTiles();
+    auto lastTileEntries =
+        lastTilesBuilder.initEntries(global_write_state_->last_tiles_.size());
+    i = 0;
+    for (auto lastTile : global_write_state_->last_tiles_) {
+      ::Map<capnp::Text, ::capnp::List<::Tile>>::Entry::Builder entry =
+          lastTileEntries[i];
+      entry.setKey(lastTile.first);
+      ::capnp::List<::Tile>::Builder lastTileBulder = entry.initValue(2);
+      ::Tile::Builder tileBuilder0 = lastTileBulder[0];
+      ::Tile::Builder tileBuilder1 = lastTileBulder[1];
+      Status status = lastTile.second.first.capnp(&tileBuilder0);
+      if (!status.ok())
+        return status;
+      status = lastTile.second.second.capnp(&tileBuilder1);
+      if (!status.ok())
+        return status;
+      i++;
+    }
+  }
+  writerBuilder->setCheckCoordDups(check_coord_dups_);
+  writerBuilder->setDedupCoords(dedup_coords_);
+  writerBuilder->setInitialized(initialized_);
+  return Status::Ok();
+  STATS_FUNC_OUT(serialization_writer_capnp);
+}
+
 Status Writer::finalize() {
   if (global_write_state_ != nullptr)
     return finalize_global_write_state();
   return Status::Ok();
+}
+
+Status Writer::from_capnp(::Writer::Reader* writerReader) {
+  STATS_FUNC_IN(serialization_writer_from_capnp);
+  Status status = Status::Ok();
+
+  if (writerReader->hasGlobalWriteState()) {
+    global_write_state_.reset(new GlobalWriteState);
+    ::GlobalWriteState::Reader globalWriteStateReader =
+        writerReader->getGlobalWriteState();
+    ::MapInt64::Reader cellsWritten = globalWriteStateReader.getCellsWritten();
+    for (auto it : cellsWritten.getEntries()) {
+      global_write_state_->cells_written_.emplace(it.getKey(), it.getValue());
+    }
+    ::Map<capnp::Text, capnp::List<::Tile>>::Reader lastTiles =
+        globalWriteStateReader.getLastTiles();
+    for (auto it : lastTiles.getEntries()) {
+      Tile new_tile1;
+      ::Tile::Reader lastTileReader1 = it.getValue()[0];
+      new_tile1.from_capnp(&lastTileReader1);
+
+      Tile new_tile2;
+      ::Tile::Reader lastTileReader2 = it.getValue()[1];
+      new_tile2.from_capnp(&lastTileReader2);
+
+      std::pair<Tile, Tile> lastTile = std::make_pair(new_tile1, new_tile2);
+      global_write_state_->last_tiles_.emplace(it.getKey(), lastTile);
+
+      // Create fragments
+      RETURN_NOT_OK(
+          create_fragment(!has_coords(), &(global_write_state_->frag_meta_)));
+    }
+  }
+
+  check_coord_dups_ = writerReader->getCheckCoordDups();
+  dedup_coords_ = writerReader->getDedupCoords();
+  initialized_ = writerReader->getInitialized();
+  return status;
+  STATS_FUNC_OUT(serialization_writer_from_capnp);
 }
 
 Status Writer::init() {

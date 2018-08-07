@@ -36,6 +36,7 @@
 #include <cassert>
 #include <cstring>
 #include <iostream>
+#include <regex>
 #include <sstream>
 #include <thread>
 
@@ -307,4 +308,316 @@ TEST_CASE_METHOD(
 
   // Clean up
   tiledb_attribute_free(&attr2_check);
+}
+
+TEST_CASE_METHOD(
+    ArraySchemaJson,
+    "C API: Test query json serialization",
+    "[capi], [json], [query]") {
+  // Create array schema
+  tiledb_array_schema_t* array_schema = create_array_schema_simple();
+
+  std::string temp_dir = FILE_URI_PREFIX + FILE_TEMP_DIR;
+
+  create_temp_dir(temp_dir);
+  std::string array_name = temp_dir + "query_test";
+
+  // Create array
+  int rc = tiledb_array_create(ctx_, array_name.c_str(), array_schema);
+  REQUIRE(rc == TILEDB_OK);
+
+  tiledb_array_t* array;
+  rc = tiledb_array_alloc(ctx_, array_name.c_str(), &array);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_array_open(ctx_, array, TILEDB_WRITE);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Prepare some data for the array
+  int data[] = {1, 2, 3, 4};
+  uint64_t data_size = sizeof(data);
+
+  // Create the query
+  tiledb_query_t* query;
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_WRITE, &query);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx_, query, TILEDB_ROW_MAJOR);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Slice only rows 1, 2, 3, 4
+  int64_t subarray[] = {1, 4};
+  rc = tiledb_query_set_subarray(ctx_, query, subarray);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer(ctx_, query, "a1", data, &data_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  char* json_string;
+  uint64_t string_size = 0;
+  tiledb_query_serialize(ctx_, query, TILEDB_JSON, &json_string, &string_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  std::string array_name_escaped = array_name;
+  array_name_escaped =
+      std::regex_replace(array_name_escaped, std::regex("/"), "\\/");
+
+  CHECK_THAT(
+      json_string,
+      Catch::Equals(
+          "{\"arraySchema\":{\"arrayType\":\"dense\",\"attributes\":[{"
+          "\"cellValNum\":1,\"compressor\":\"NO_COMPRESSION\","
+          "\"compressorLevel\":-1,\"name\":\"a1\",\"type\":\"INT32\"}],"
+          "\"capacity\":\"10000\",\"cellOrder\":\"row-major\","
+          "\"coordsCompression\":\"ZSTD\",\"coordsCompressionLevel\":-1,"
+          "\"domain\":{\"cellOrder\":\"row-major\",\"dimensions\":[{\"name\":"
+          "\"d1\",\"nullTileExtent\":false,\"type\":\"INT64\",\"tileExtent\":{"
+          "\"int64\":\"5\"},\"domain\":{\"int64\":[\"0\",\"99\"]}}],"
+          "\"tileOrder\":\"row-major\",\"type\":\"INT64\"},"
+          "\"offsetCompression\":\"ZSTD\",\"offsetCompressionLevel\":-1,"
+          "\"tileOrder\":\"row-major\",\"uri\":\"" +
+          array_name_escaped +
+          "\",\"version\":[1,3,0]},\"buffers\":{\"entries\":[{"
+          "\"key\":\"a1\",\"value\":{\"type\":\"INT32\",\"buffer\":{"
+          "\"int32\":[1,2,3,4]}}}]},\"layout\":\"row-major\",\"status\":"
+          "\"UNINITIALIZED\",\"type\":\"WRITE\",\"subarray\":{\"int64\":["
+          "\"1\",\"4\"]}}"));
+
+  // Create the query
+  tiledb_query_t* query_deserialize = nullptr;
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_WRITE, &query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+
+  rc = tiledb_query_deserialize(
+      ctx_, query_deserialize, TILEDB_JSON, json_string, string_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  char* json_string2;
+  uint64_t string_size2 = 0;
+  tiledb_query_serialize(
+      ctx_, query_deserialize, TILEDB_JSON, &json_string2, &string_size2);
+  REQUIRE(rc == TILEDB_OK);
+  CHECK_THAT(json_string2, Catch::Equals(json_string));
+  delete[] json_string;
+  delete[] json_string2;
+
+  // Submit query
+  rc = tiledb_query_submit(ctx_, query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Finalize query
+  rc = tiledb_query_finalize(ctx_, query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Close array
+  rc = tiledb_array_close(ctx_, array);
+  REQUIRE(rc == TILEDB_OK);
+
+  rc = tiledb_array_open(ctx_, array, TILEDB_READ);
+  REQUIRE(rc == TILEDB_OK);
+  tiledb_query_free(&query);
+
+  // Create the query
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_READ, &query);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx_, query, TILEDB_ROW_MAJOR);
+  REQUIRE(rc == TILEDB_OK);
+
+  int data_buffer[16] = {0};
+  uint64_t data_buffer_size = sizeof(data_buffer);
+  rc = tiledb_query_set_buffer(
+      ctx_, query, "a1", data_buffer, &data_buffer_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Slice only rows 1, 2 and cols 2, 3, 4
+  rc = tiledb_query_set_subarray(ctx_, query, subarray);
+  REQUIRE(rc == TILEDB_OK);
+
+  tiledb_query_serialize(ctx_, query, TILEDB_JSON, &json_string, &string_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  CHECK_THAT(
+      json_string,
+      Catch::Equals(
+          "{\"arraySchema\":{\"arrayType\":\"dense\",\"attributes\":[{"
+          "\"cellValNum\":1,\"compressor\":\"NO_COMPRESSION\","
+          "\"compressorLevel\":-1,\"name\":\"a1\",\"type\":\"INT32\"}],"
+          "\"capacity\":\"10000\",\"cellOrder\":\"row-major\","
+          "\"coordsCompression\":\"ZSTD\",\"coordsCompressionLevel\":-1,"
+          "\"domain\":{\"cellOrder\":\"row-major\",\"dimensions\":[{\"name\":"
+          "\"d1\",\"nullTileExtent\":false,\"type\":\"INT64\",\"tileExtent\":{"
+          "\"int64\":\"5\"},\"domain\":{\"int64\":[\"0\",\"99\"]}}],"
+          "\"tileOrder\":\"row-major\",\"type\":\"INT64\"},"
+          "\"offsetCompression\":\"ZSTD\",\"offsetCompressionLevel\":-1,"
+          "\"tileOrder\":\"row-major\",\"uri\":\"" +
+          array_name_escaped +
+          "\",\"version\":[1,3,0]},\"buffers\":{\"entries\":[{"
+          "\"key\":\"a1\",\"value\":{\"type\":\"INT32\",\"buffer\":{"
+          "\"int32\":[0,0,0,0,0,0,0,0,0,0,0,0,0,0,0,0]}}}]},\"layout\":"
+          "\"row-major\",\"status\":\"UNINITIALIZED\",\"type\":\"READ\","
+          "\"subarray\":{\"int64\":[\"1\",\"4\"]}}"));
+  tiledb_array_schema_free(&array_schema);
+
+  // Clean up
+  delete[] json_string;
+  tiledb_array_free(&array);
+  tiledb_query_free(&query);
+  tiledb_query_free(&query_deserialize);
+  remove_temp_dir(temp_dir);
+}
+
+TEST_CASE_METHOD(
+    ArraySchemaJson,
+    "C API: Test global query json serialization",
+    "[capi], [json], [query]") {
+  // Create array schema
+  tiledb_array_schema_t* array_schema = create_array_schema_simple();
+
+  std::string temp_dir = FILE_URI_PREFIX + FILE_TEMP_DIR;
+
+  create_temp_dir(temp_dir);
+  std::string array_name = temp_dir + "query_test";
+
+  // Create array
+  int rc = tiledb_array_create(ctx_, array_name.c_str(), array_schema);
+  REQUIRE(rc == TILEDB_OK);
+
+  tiledb_array_t* array;
+  rc = tiledb_array_alloc(ctx_, array_name.c_str(), &array);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_array_open(ctx_, array, TILEDB_WRITE);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Prepare some data for the array
+  int data[] = {1, 2, 3, 4, 5};
+  uint64_t data_size = sizeof(data);
+
+  // Create the query
+  tiledb_query_t* query;
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_WRITE, &query);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx_, query, TILEDB_GLOBAL_ORDER);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Slice only rows 1, 2, 3, 4
+  int64_t subarray[] = {0, 4};
+  rc = tiledb_query_set_subarray(ctx_, query, subarray);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer(ctx_, query, "a1", data, &data_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  char* json_string;
+  uint64_t string_size = 0;
+  tiledb_query_serialize(ctx_, query, TILEDB_JSON, &json_string, &string_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  std::string array_name_escaped = array_name;
+  array_name_escaped =
+      std::regex_replace(array_name_escaped, std::regex("/"), "\\/");
+
+  CHECK_THAT(
+      json_string,
+      Catch::Equals(
+          "{\"arraySchema\":{\"arrayType\":\"dense\",\"attributes\":[{"
+          "\"cellValNum\":1,\"compressor\":\"NO_COMPRESSION\","
+          "\"compressorLevel\":-1,\"name\":\"a1\",\"type\":\"INT32\"}],"
+          "\"capacity\":\"10000\",\"cellOrder\":\"row-major\","
+          "\"coordsCompression\":\"ZSTD\",\"coordsCompressionLevel\":-1,"
+          "\"domain\":{\"cellOrder\":\"row-major\",\"dimensions\":[{\"name\":"
+          "\"d1\",\"nullTileExtent\":false,\"type\":\"INT64\",\"tileExtent\":{"
+          "\"int64\":\"5\"},\"domain\":{\"int64\":[\"0\",\"99\"]}}],"
+          "\"tileOrder\":\"row-major\",\"type\":\"INT64\"},"
+          "\"offsetCompression\":\"ZSTD\",\"offsetCompressionLevel\":-1,"
+          "\"tileOrder\":\"row-major\",\"uri\":\"" +
+          array_name_escaped +
+          "\",\"version\":[1,3,0]},\"buffers\":{\"entries\":[{\"key\":\"a1\","
+          "\"value\":{\"type\":\"INT32\",\"buffer\":{\"int32\":[1,2,3,4,5]}}}]}"
+          ",\"layout\":\"global-order\",\"status\":\"UNINITIALIZED\",\"type\":"
+          "\"WRITE\",\"writer\":{\"globalWriteState\":{},\"checkCoordDups\":"
+          "false,\"dedupCoords\":false,"
+          "\"initialized\":false},\"subarray\":{"
+          "\"int64\":[\"0\",\"4\"]}}"));
+
+  // Create the query
+  tiledb_query_t* query_deserialize;
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_WRITE, &query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_deserialize(
+      ctx_, query_deserialize, TILEDB_JSON, json_string, string_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Prepare some data for the array
+  int data2[5] = {0};
+  uint64_t data2_size = sizeof(data);
+  rc = tiledb_query_set_buffer(ctx_, query, "a1", data, &data_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  char* json_string2;
+  uint64_t string_size2 = 0;
+  tiledb_query_serialize(
+      ctx_, query_deserialize, TILEDB_JSON, &json_string2, &string_size2);
+  REQUIRE(rc == TILEDB_OK);
+  CHECK_THAT(json_string2, Catch::Equals(json_string));
+  delete[] json_string;
+  delete[] json_string2;
+
+  // Submit query
+  rc = tiledb_query_submit(ctx_, query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Finalize query
+  rc = tiledb_query_finalize(ctx_, query_deserialize);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Close array
+  rc = tiledb_array_close(ctx_, array);
+  REQUIRE(rc == TILEDB_OK);
+
+  rc = tiledb_array_open(ctx_, array, TILEDB_READ);
+  REQUIRE(rc == TILEDB_OK);
+  tiledb_query_free(&query);
+
+  // Create the query
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_READ, &query);
+  REQUIRE(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx_, query, TILEDB_GLOBAL_ORDER);
+  REQUIRE(rc == TILEDB_OK);
+
+  int data_buffer[16] = {0};
+  uint64_t data_buffer_size = sizeof(data_buffer);
+  rc = tiledb_query_set_buffer(
+      ctx_, query, "a1", data_buffer, &data_buffer_size);
+  REQUIRE(rc == TILEDB_OK);
+
+  // Slice only rows 1, 2 and cols 2, 3, 4
+  rc = tiledb_query_set_subarray(ctx_, query, subarray);
+  REQUIRE(rc == TILEDB_OK);
+
+  tiledb_query_serialize(ctx_, query, TILEDB_JSON, &json_string, &string_size);
+  REQUIRE(rc == TILEDB_OK);
+  CHECK_THAT(
+      json_string,
+      Catch::Equals(
+          "{\"arraySchema\":{\"arrayType\":\"dense\",\"attributes\":[{"
+          "\"cellValNum\":1,\"compressor\":\"NO_COMPRESSION\","
+          "\"compressorLevel\":-1,\"name\":\"a1\",\"type\":\"INT32\"}],"
+          "\"capacity\":\"10000\",\"cellOrder\":\"row-major\","
+          "\"coordsCompression\":\"ZSTD\",\"coordsCompressionLevel\":-1,"
+          "\"domain\":{\"cellOrder\":\"row-major\",\"dimensions\":[{\"name\":"
+          "\"d1\",\"nullTileExtent\":false,\"type\":\"INT64\",\"tileExtent\":{"
+          "\"int64\":\"5\"},\"domain\":{\"int64\":[\"0\",\"99\"]}}],"
+          "\"tileOrder\":\"row-major\",\"type\":\"INT64\"},"
+          "\"offsetCompression\":\"ZSTD\",\"offsetCompressionLevel\":-1,"
+          "\"tileOrder\":\"row-major\",\"uri\":\"" +
+          array_name_escaped +
+          "\",\"version\":[1,3,0]},\"buffers\":{\"entries\":[{\"key\":\"a1\","
+          "\"value\":{\"type\":\"INT32\",\"buffer\":{\"int32\":[0,0,0,0,0,0,0,"
+          "0,0,0,0,0,0,0,0,0]}}}]},\"layout\":\"global-order\",\"status\":"
+          "\"UNINITIALIZED\",\"type\":\"READ\",\"subarray\":{\"int64\":[\"0\","
+          "\"4\"]}}"));
+  tiledb_array_schema_free(&array_schema);
+
+  // Clean up
+  delete[] json_string;
+  tiledb_array_free(&array);
+  tiledb_query_free(&query);
+  tiledb_query_free(&query_deserialize);
+  remove_temp_dir(temp_dir);
 }

@@ -186,7 +186,7 @@ struct AttributeBuffer::Buffer {
     UINT64,
     FLOAT32,
     FLOAT64,
-    LIST_TEXT,
+    TEXT,
   };
 
   struct _capnpPrivate {
@@ -463,7 +463,7 @@ struct Writer {
   class Pipeline;
 
   struct _capnpPrivate {
-    CAPNP_DECLARE_STRUCT_HEADER(8ba60147a0e6735e, 0, 1)
+    CAPNP_DECLARE_STRUCT_HEADER(8ba60147a0e6735e, 1, 1)
 #if !CAPNP_LITE
     static constexpr ::capnp::_::RawBrandedSchema const* brand() {
       return &schema->defaultBrand;
@@ -1020,9 +1020,9 @@ class AttributeBuffer::Buffer::Reader {
   inline bool hasFloat64() const;
   inline ::capnp::List<double>::Reader getFloat64() const;
 
-  inline bool isListText() const;
-  inline bool hasListText() const;
-  inline ::capnp::Text::Reader getListText() const;
+  inline bool isText() const;
+  inline bool hasText() const;
+  inline ::capnp::Text::Reader getText() const;
 
  private:
   ::capnp::_::StructReader _reader;
@@ -1154,13 +1154,13 @@ class AttributeBuffer::Buffer::Builder {
   inline void adoptFloat64(::capnp::Orphan<::capnp::List<double>>&& value);
   inline ::capnp::Orphan<::capnp::List<double>> disownFloat64();
 
-  inline bool isListText();
-  inline bool hasListText();
-  inline ::capnp::Text::Builder getListText();
-  inline void setListText(::capnp::Text::Reader value);
-  inline ::capnp::Text::Builder initListText(unsigned int size);
-  inline void adoptListText(::capnp::Orphan<::capnp::Text>&& value);
-  inline ::capnp::Orphan<::capnp::Text> disownListText();
+  inline bool isText();
+  inline bool hasText();
+  inline ::capnp::Text::Builder getText();
+  inline void setText(::capnp::Text::Reader value);
+  inline ::capnp::Text::Builder initText(unsigned int size);
+  inline void adoptText(::capnp::Orphan<::capnp::Text>&& value);
+  inline ::capnp::Orphan<::capnp::Text> disownText();
 
  private:
   ::capnp::_::StructBuilder _builder;
@@ -2859,6 +2859,12 @@ class Writer::Reader {
   inline bool hasGlobalWriteState() const;
   inline ::GlobalWriteState::Reader getGlobalWriteState() const;
 
+  inline bool getCheckCoordDups() const;
+
+  inline bool getDedupCoords() const;
+
+  inline bool getInitialized() const;
+
  private:
   ::capnp::_::StructReader _reader;
   template <typename, ::capnp::Kind>
@@ -2905,6 +2911,15 @@ class Writer::Builder {
   inline void adoptGlobalWriteState(
       ::capnp::Orphan<::GlobalWriteState>&& value);
   inline ::capnp::Orphan<::GlobalWriteState> disownGlobalWriteState();
+
+  inline bool getCheckCoordDups();
+  inline void setCheckCoordDups(bool value);
+
+  inline bool getDedupCoords();
+  inline void setDedupCoords(bool value);
+
+  inline bool getInitialized();
+  inline void setInitialized(bool value);
 
  private:
   ::capnp::_::StructBuilder _builder;
@@ -4763,70 +4778,66 @@ AttributeBuffer::Buffer::Builder::disownFloat64() {
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS));
 }
 
-inline bool AttributeBuffer::Buffer::Reader::isListText() const {
-  return which() == AttributeBuffer::Buffer::LIST_TEXT;
+inline bool AttributeBuffer::Buffer::Reader::isText() const {
+  return which() == AttributeBuffer::Buffer::TEXT;
 }
-inline bool AttributeBuffer::Buffer::Builder::isListText() {
-  return which() == AttributeBuffer::Buffer::LIST_TEXT;
+inline bool AttributeBuffer::Buffer::Builder::isText() {
+  return which() == AttributeBuffer::Buffer::TEXT;
 }
-inline bool AttributeBuffer::Buffer::Reader::hasListText() const {
-  if (which() != AttributeBuffer::Buffer::LIST_TEXT)
+inline bool AttributeBuffer::Buffer::Reader::hasText() const {
+  if (which() != AttributeBuffer::Buffer::TEXT)
     return false;
   return !_reader.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS)
               .isNull();
 }
-inline bool AttributeBuffer::Buffer::Builder::hasListText() {
-  if (which() != AttributeBuffer::Buffer::LIST_TEXT)
+inline bool AttributeBuffer::Buffer::Builder::hasText() {
+  if (which() != AttributeBuffer::Buffer::TEXT)
     return false;
   return !_builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS)
               .isNull();
 }
-inline ::capnp::Text::Reader AttributeBuffer::Buffer::Reader::getListText()
-    const {
+inline ::capnp::Text::Reader AttributeBuffer::Buffer::Reader::getText() const {
   KJ_IREQUIRE(
-      (which() == AttributeBuffer::Buffer::LIST_TEXT),
+      (which() == AttributeBuffer::Buffer::TEXT),
       "Must check which() before get()ing a union member.");
   return ::capnp::_::PointerHelpers<::capnp::Text>::get(
       _reader.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline ::capnp::Text::Builder AttributeBuffer::Buffer::Builder::getListText() {
+inline ::capnp::Text::Builder AttributeBuffer::Buffer::Builder::getText() {
   KJ_IREQUIRE(
-      (which() == AttributeBuffer::Buffer::LIST_TEXT),
+      (which() == AttributeBuffer::Buffer::TEXT),
       "Must check which() before get()ing a union member.");
   return ::capnp::_::PointerHelpers<::capnp::Text>::get(
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS));
 }
-inline void AttributeBuffer::Buffer::Builder::setListText(
+inline void AttributeBuffer::Buffer::Builder::setText(
     ::capnp::Text::Reader value) {
   _builder.setDataField<AttributeBuffer::Buffer::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS,
-      AttributeBuffer::Buffer::LIST_TEXT);
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, AttributeBuffer::Buffer::TEXT);
   ::capnp::_::PointerHelpers<::capnp::Text>::set(
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS),
       value);
 }
-inline ::capnp::Text::Builder AttributeBuffer::Buffer::Builder::initListText(
+inline ::capnp::Text::Builder AttributeBuffer::Buffer::Builder::initText(
     unsigned int size) {
   _builder.setDataField<AttributeBuffer::Buffer::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS,
-      AttributeBuffer::Buffer::LIST_TEXT);
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, AttributeBuffer::Buffer::TEXT);
   return ::capnp::_::PointerHelpers<::capnp::Text>::init(
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS),
       size);
 }
-inline void AttributeBuffer::Buffer::Builder::adoptListText(
+inline void AttributeBuffer::Buffer::Builder::adoptText(
     ::capnp::Orphan<::capnp::Text>&& value) {
   _builder.setDataField<AttributeBuffer::Buffer::Which>(
-      ::capnp::bounded<0>() * ::capnp::ELEMENTS,
-      AttributeBuffer::Buffer::LIST_TEXT);
+      ::capnp::bounded<0>() * ::capnp::ELEMENTS, AttributeBuffer::Buffer::TEXT);
   ::capnp::_::PointerHelpers<::capnp::Text>::adopt(
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS),
       kj::mv(value));
 }
 inline ::capnp::Orphan<::capnp::Text>
-AttributeBuffer::Buffer::Builder::disownListText() {
+AttributeBuffer::Buffer::Builder::disownText() {
   KJ_IREQUIRE(
-      (which() == AttributeBuffer::Buffer::LIST_TEXT),
+      (which() == AttributeBuffer::Buffer::TEXT),
       "Must check which() before get()ing a union member.");
   return ::capnp::_::PointerHelpers<::capnp::Text>::disown(
       _builder.getPointerField(::capnp::bounded<1>() * ::capnp::POINTERS));
@@ -7556,6 +7567,39 @@ inline ::capnp::Orphan<::GlobalWriteState>
 Writer::Builder::disownGlobalWriteState() {
   return ::capnp::_::PointerHelpers<::GlobalWriteState>::disown(
       _builder.getPointerField(::capnp::bounded<0>() * ::capnp::POINTERS));
+}
+
+inline bool Writer::Reader::getCheckCoordDups() const {
+  return _reader.getDataField<bool>(::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+
+inline bool Writer::Builder::getCheckCoordDups() {
+  return _builder.getDataField<bool>(::capnp::bounded<0>() * ::capnp::ELEMENTS);
+}
+inline void Writer::Builder::setCheckCoordDups(bool value) {
+  _builder.setDataField<bool>(::capnp::bounded<0>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Writer::Reader::getDedupCoords() const {
+  return _reader.getDataField<bool>(::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+
+inline bool Writer::Builder::getDedupCoords() {
+  return _builder.getDataField<bool>(::capnp::bounded<1>() * ::capnp::ELEMENTS);
+}
+inline void Writer::Builder::setDedupCoords(bool value) {
+  _builder.setDataField<bool>(::capnp::bounded<1>() * ::capnp::ELEMENTS, value);
+}
+
+inline bool Writer::Reader::getInitialized() const {
+  return _reader.getDataField<bool>(::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+
+inline bool Writer::Builder::getInitialized() {
+  return _builder.getDataField<bool>(::capnp::bounded<2>() * ::capnp::ELEMENTS);
+}
+inline void Writer::Builder::setInitialized(bool value) {
+  _builder.setDataField<bool>(::capnp::bounded<2>() * ::capnp::ELEMENTS, value);
 }
 
 inline bool Query::Reader::hasArraySchema() const {
