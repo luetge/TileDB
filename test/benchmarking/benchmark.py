@@ -10,6 +10,8 @@ import sys
 benchmark_src_dir = os.path.abspath('src')
 benchmark_build_dir = os.path.abspath('build')
 
+NUM_TRIALS = 3
+
 if os.name == 'posix':
     if sys.platform == 'darwin':
         os_name = 'mac'
@@ -81,8 +83,12 @@ def run_benchmark(args):
     benchmarks = list_benchmarks()
     for b in benchmarks:
         exe = os.path.join(benchmark_build_dir, b)
-        output_json = subprocess.check_output([exe])
-        # results = json.loads(output_json)
+        subprocess.check_output([exe, 'setup'])
+
+        for i in range(0, NUM_TRIALS):
+            subprocess.check_output([exe, 'run'])
+
+        subprocess.check_output([exe, 'teardown'])
 
 
 def main():

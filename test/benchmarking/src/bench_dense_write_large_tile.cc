@@ -1,5 +1,5 @@
 /**
- * @file   main.cc
+ * @file   bench_dense_write_large_tile.cc
  *
  * @section LICENSE
  *
@@ -25,9 +25,6 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  *
- * @section DESCRIPTION
- *
- * This is a TileDB benchmark program.
  */
 
 #include <tiledb/tiledb>

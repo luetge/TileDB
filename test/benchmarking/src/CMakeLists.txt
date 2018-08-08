@@ -43,7 +43,7 @@ add_library(benchmark_core OBJECT
 
 # List of benchmarks
 set(BENCHMARKS
-  bench_first
+  bench_dense_write_large_tile
 )
 
 foreach(NAME IN LISTS BENCHMARKS)
