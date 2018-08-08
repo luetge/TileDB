@@ -78,17 +78,32 @@ def build_benchmark(args):
     subprocess.check_output(['make', '-j4'], cwd=benchmark_build_dir)
 
 
-def run_benchmark(args):
+def print_results(results):
+    "Prints benchmark timing results."
+    print('Reporting minimum time of {} runs for each benchmark:'.format(
+        NUM_TRIALS))
+    for bench in sorted(results.keys()):
+        print('{:<30s}{:>60d} ms'.format(bench, min(results[bench])))
+
+
+def run_benchmarks(args):
     """Runs the benchmark programs."""
     benchmarks = list_benchmarks()
+    results = {}
     for b in benchmarks:
         exe = os.path.join(benchmark_build_dir, b)
         subprocess.check_output([exe, 'setup'])
 
+        times_ms = []
         for i in range(0, NUM_TRIALS):
-            subprocess.check_output([exe, 'run'])
+            output_json = subprocess.check_output([exe, 'run'])
+            result = json.loads(output_json)
+            times_ms.append(result['value'])
+        results[b] = times_ms
 
         subprocess.check_output([exe, 'teardown'])
+
+    print_results(results)
 
 
 def main():
@@ -112,7 +127,7 @@ def main():
         list_benchmarks(show=True)
         sys.exit(0)
 
-    run_benchmark(args)
+    run_benchmarks(args)
 
 
 if __name__ == '__main__':

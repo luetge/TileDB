@@ -27,6 +27,8 @@
  *
  */
 
+#include <chrono>
+#include <thread>
 #include <tiledb/tiledb>
 
 #include "benchmark.h"
@@ -41,6 +43,10 @@ class Benchmark : public BenchmarkBase {
     tiledb::VFS vfs(ctx_);
     if (vfs.is_dir(array_uri))
       vfs.remove_dir(array_uri);
+  }
+
+  virtual void run() {
+    std::this_thread::sleep_for(std::chrono::milliseconds(1230));
   }
 
  private:

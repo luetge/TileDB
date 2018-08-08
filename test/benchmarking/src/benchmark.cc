@@ -30,6 +30,8 @@
  * Defines common code for the benchmark programs.
  */
 
+#include <chrono>
+#include <iostream>
 #include <string>
 
 #include "benchmark.h"
@@ -51,15 +53,36 @@ int BenchmarkBase::main(int argc, char** argv) {
 }
 
 void BenchmarkBase::teardown_base() {
+  auto t0 = std::chrono::steady_clock::now();
+
   teardown();
+
+  auto t1 = std::chrono::steady_clock::now();
+  uint64_t ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+  print_json("teardown", ms);
 }
 
 void BenchmarkBase::setup_base() {
+  auto t0 = std::chrono::steady_clock::now();
+
   setup();
+
+  auto t1 = std::chrono::steady_clock::now();
+  uint64_t ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+  print_json("setup", ms);
 }
 
 void BenchmarkBase::run_base() {
+  auto t0 = std::chrono::steady_clock::now();
+
   run();
+
+  auto t1 = std::chrono::steady_clock::now();
+  uint64_t ms =
+      std::chrono::duration_cast<std::chrono::milliseconds>(t1 - t0).count();
+  print_json("run", ms);
 }
 
 void BenchmarkBase::teardown() {
@@ -69,4 +92,9 @@ void BenchmarkBase::setup() {
 }
 
 void BenchmarkBase::run() {
+}
+
+void BenchmarkBase::print_json(const std::string& name, uint64_t value) {
+  std::cout << "{ \"phase\": \"" << name << "\", \"value\": " << value
+            << " }\n";
 }

@@ -34,6 +34,7 @@
 #define TILEDB_BENCHMARK_H
 
 #include <cassert>
+#include <string>
 
 /**
  * Base class for benchmarks.
@@ -61,6 +62,9 @@ class BenchmarkBase {
   virtual void setup();
   virtual void teardown();
   virtual void run();
+
+private:
+  void print_json(const std::string& name, uint64_t value);
 };
 
 #endif
