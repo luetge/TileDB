@@ -43,6 +43,7 @@ add_library(benchmark_core OBJECT
 
 # List of benchmarks
 set(BENCHMARKS
+  bench_dense_read_large_tile
   bench_dense_write_large_tile
   bench_dense_write_small_tile
 )

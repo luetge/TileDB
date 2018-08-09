@@ -139,6 +139,9 @@ def run_benchmarks(args):
     else:
         benchmarks = args.benchmarks.split(',')
 
+    print('Dropping caches (you may be prompted for sudo access).')
+    drop_fs_caches()
+
     print('Running benchmarks...')
     p = ProgressBar()
 
