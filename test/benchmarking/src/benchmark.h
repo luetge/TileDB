@@ -48,23 +48,38 @@ class BenchmarkBase {
   int main(int argc, char** argv);
 
   /**
-   * Pre run setup method.
+   * Benchmark setup (array creation, etc).
    */
   void setup_base();
 
-  /** Post run cleanup. */
+  /** Benchmark cleanup (array removal, etc). */
   void teardown_base();
 
-  /** Run method. */
+  /** Benchmark run method to be timed. */
   void run_base();
 
  protected:
+  /** Implemented by subclass: the setup phase. */
   virtual void setup();
+
+  /** Implemented by subclass: the cleanup phase. */
   virtual void teardown();
+
+  /**
+   * Implemented by subclass: anything that needs to happen in the same process
+   * as 'run' but should be excluded from the benchmark run time, e.g.
+   * query buffer allocation.
+   */
+  virtual void pre_run();
+
+  /** Implemented by subclass: the run phase. */
   virtual void run();
 
-private:
-  void print_json_ms(const std::string& name, uint64_t ms);
+ private:
+  /**
+   * Prints a time in milliseconds for a task name in JSON.
+   */
+  void print_task_ms_json(const std::string& name, uint64_t ms);
 };
 
 #endif

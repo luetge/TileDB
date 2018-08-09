@@ -27,7 +27,7 @@
  *
  * @section DESCRIPTION
  *
- * Benchmarks compressed dense 2D write performance with "large" tiles.
+ * Benchmark compressed dense 2D write performance with a single large tile.
  */
 
 #include <chrono>
@@ -59,26 +59,29 @@ class Benchmark : public BenchmarkBase {
       vfs.remove_dir(array_uri_);
   }
 
+  virtual void pre_run() {
+    data_.resize(array_rows * array_cols);
+    for (uint64_t i = 0; i < data_.size(); i++) {
+      data_[i] = i;
+    }
+  }
+
   virtual void run() {
     Array array(ctx_, array_uri_, TILEDB_WRITE);
     Query query(ctx_, array, TILEDB_WRITE);
-    std::vector<int> data;
-    data.resize(array_rows * array_cols);
-    for (uint64_t i = 0; i < data.size(); i++) {
-      data[i] = i;
-    }
     query.set_subarray({1u, array_rows, 1u, array_cols})
         .set_layout(TILEDB_ROW_MAJOR)
-        .set_buffer("a", data);
+        .set_buffer("a", data_);
     query.submit();
     array.close();
   }
 
  private:
   const std::string array_uri_ = "bench_array";
-  const unsigned array_rows = 8000, array_cols = 8000;
+  const unsigned array_rows = 10000, array_cols = 10000;
 
   Context ctx_;
+  std::vector<int> data_;
 };
 
 int main(int argc, char** argv) {
