@@ -78,7 +78,7 @@ def list_benchmarks(show=False):
     return names
 
 
-def build_benchmark(args):
+def build_benchmarks(args):
     """Builds all the benchmark programs."""
     if not os.path.exists(benchmark_build_dir):
         os.mkdir(benchmark_build_dir)
@@ -101,10 +101,18 @@ def print_results(results):
 
 def run_benchmarks(args):
     """Runs the benchmark programs."""
-    benchmarks = list_benchmarks()
+    if args.benchmarks is None:
+        benchmarks = list_benchmarks()
+    else:
+        benchmarks = args.benchmarks.split(',')
+
     results = {}
     for b in benchmarks:
         exe = os.path.join(benchmark_build_dir, b)
+        if not os.path.exists(exe):
+            print('Error: no benchmark named "{}"'.format(b))
+            continue
+
         subprocess.check_output([exe, 'setup'], cwd=benchmark_build_dir)
 
         times_ms = []
@@ -130,6 +138,9 @@ def main():
                              'also set the TILEDB_PATH environment variable.')
     parser.add_argument('-l', '--list', action='store_true', default=False,
                         help='List all available benchmarks and exit.')
+    parser.add_argument('-b', '--benchmarks', metavar='NAMES',
+                        help='If given, one or more comma-separated names of '
+                             'benchmarks to run.')
     args = parser.parse_args()
 
     if find_tiledb_path(args) is None:
@@ -137,7 +148,7 @@ def main():
             args.tiledb))
         sys.exit(1)
 
-    build_benchmark(args)
+    build_benchmarks(args)
 
     if args.list:
         list_benchmarks(show=True)
