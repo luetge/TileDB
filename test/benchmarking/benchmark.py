@@ -82,6 +82,7 @@ def print_results(results):
     "Prints benchmark timing results."
     print('Reporting minimum time of {} runs for each benchmark:'.format(
         NUM_TRIALS))
+    print('-' * 93)
     for bench in sorted(results.keys()):
         print('{:<30s}{:>60d} ms'.format(bench, min(results[bench])))
 
@@ -98,7 +99,7 @@ def run_benchmarks(args):
         for i in range(0, NUM_TRIALS):
             output_json = subprocess.check_output([exe, 'run'])
             result = json.loads(output_json)
-            times_ms.append(result['value'])
+            times_ms.append(result['ms'])
         results[b] = times_ms
 
         subprocess.check_output([exe, 'teardown'])

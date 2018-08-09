@@ -64,7 +64,7 @@ class BenchmarkBase {
   virtual void run();
 
 private:
-  void print_json(const std::string& name, uint64_t value);
+  void print_json_ms(const std::string& name, uint64_t ms);
 };
 
 #endif
