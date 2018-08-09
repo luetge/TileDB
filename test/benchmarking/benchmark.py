@@ -6,6 +6,8 @@ import json
 import os
 import subprocess
 import sys
+import threading
+import time
 
 benchmark_src_dir = os.path.abspath('src')
 benchmark_build_dir = os.path.abspath('build')
@@ -22,6 +24,32 @@ if os.name == 'posix':
 elif os.name == 'nt':
     os_name = 'windows'
     libtiledb_name = 'tiledb.dll'
+
+
+class ProgressBar(threading.Thread):
+    def __init__(self):
+        super(ProgressBar, self).__init__()
+        self.running = False
+        self.start()
+
+    def start(self):
+        self.running = True
+        super(ProgressBar, self).start()
+
+    def run(self):
+        chars = ['-', '\\', '|', '/']
+        i = 0
+        while self.running:
+            sys.stdout.write('\r{}'.format(chars[i]))
+            sys.stdout.flush()
+            i = (i + 1) % 4
+            time.sleep(0.2)
+
+    def stop(self):
+        self.running = False
+        self.join()
+        print('\rDone.')
+        sys.stdout.flush()
 
 
 def sync_fs():
@@ -83,11 +111,16 @@ def build_benchmarks(args):
     if not os.path.exists(benchmark_build_dir):
         os.mkdir(benchmark_build_dir)
     tiledb_path = find_tiledb_path(args)
-    subprocess.check_output(
-        ['cmake', '-DCMAKE_PREFIX_PATH={}'.format(tiledb_path),
-         benchmark_src_dir],
-        cwd=benchmark_build_dir)
-    subprocess.check_output(['make', '-j4'], cwd=benchmark_build_dir)
+    print('Building benchmarks...')
+    p = ProgressBar()
+    try:
+        subprocess.check_output(
+            ['cmake', '-DCMAKE_PREFIX_PATH={}'.format(tiledb_path),
+             benchmark_src_dir],
+            cwd=benchmark_build_dir)
+        subprocess.check_output(['make', '-j4'], cwd=benchmark_build_dir)
+    finally:
+        p.stop()
 
 
 def print_results(results):
@@ -106,26 +139,32 @@ def run_benchmarks(args):
     else:
         benchmarks = args.benchmarks.split(',')
 
-    results = {}
-    for b in benchmarks:
-        exe = os.path.join(benchmark_build_dir, b)
-        if not os.path.exists(exe):
-            print('Error: no benchmark named "{}"'.format(b))
-            continue
+    print('Running benchmarks...')
+    p = ProgressBar()
 
-        subprocess.check_output([exe, 'setup'], cwd=benchmark_build_dir)
+    try:
+        results = {}
+        for b in benchmarks:
+            exe = os.path.join(benchmark_build_dir, b)
+            if not os.path.exists(exe):
+                print('Error: no benchmark named "{}"'.format(b))
+                continue
 
-        times_ms = []
-        for i in range(0, NUM_TRIALS):
-            sync_fs()
-            drop_fs_caches()
-            output_json = subprocess.check_output([exe, 'run'],
-                                                  cwd=benchmark_build_dir)
-            result = json.loads(output_json)
-            times_ms.append(result['ms'])
-        results[b] = times_ms
+            subprocess.check_output([exe, 'setup'], cwd=benchmark_build_dir)
 
-        subprocess.check_output([exe, 'teardown'], cwd=benchmark_build_dir)
+            times_ms = []
+            for i in range(0, NUM_TRIALS):
+                sync_fs()
+                drop_fs_caches()
+                output_json = subprocess.check_output([exe, 'run'],
+                                                      cwd=benchmark_build_dir)
+                result = json.loads(output_json)
+                times_ms.append(result['ms'])
+            results[b] = times_ms
+
+            subprocess.check_output([exe, 'teardown'], cwd=benchmark_build_dir)
+    finally:
+        p.stop()
 
     print_results(results)
 
