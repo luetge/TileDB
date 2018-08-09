@@ -33,6 +33,21 @@ project(TileDBBenchmark)
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
+
+if (WIN32)
+  if (CMAKE_BUILD_TYPE MATCHES "Debug")
+    add_compile_options(/DDEBUG /Od /Zi)
+  elseif (CMAKE_BUILD_TYPE MATCHES "Release")
+    add_compile_options(/DNDEBUG /Ox)
+  endif()
+else()
+  if (CMAKE_BUILD_TYPE MATCHES "Debug")
+    add_compile_options(-DDEBUG -O0 -g3 -ggdb3 -gdwarf-3)
+  elseif (CMAKE_BUILD_TYPE MATCHES "Release")
+    add_compile_options(-DNDEBUG -O3)
+  endif()
+endif()
+
 # Find TileDB
 find_package(TileDB REQUIRED)
 
@@ -50,9 +65,9 @@ set(BENCHMARKS
 )
 
 foreach(NAME IN LISTS BENCHMARKS)
-    add_executable(${NAME} "${NAME}.cc")
-    target_link_libraries(${NAME}
-      TileDB::tiledb_shared
-      benchmark_core
-    )
+  add_executable(${NAME} "${NAME}.cc")
+  target_link_libraries(${NAME}
+    TileDB::tiledb_shared
+    benchmark_core
+  )
 endforeach()

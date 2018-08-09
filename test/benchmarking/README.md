@@ -4,13 +4,12 @@ This directory contains simple benchmarking programs intended for quick apples-a
 
 ## How to run
 
-1. Build TileDB and install locally.
+1. Build TileDB and install a release version locally.
 
     ```bash
     $ cd TileDB/build
     $ ../bootstrap && make -j4 && make install-tiledb
     $ cd ../dist
-    $ export TILEDB_INSTALL=`pwd`
     ```
 
 2. Run the benchmarking script.
@@ -19,8 +18,10 @@ This directory contains simple benchmarking programs intended for quick apples-a
     $ cd TileDB/test/benchmarking
     $ ./benchmark.py
     ```
-    
-The Python script is just a harness for executing the benchmark program, which uses the C++ API.
+
+The Python script is just a harness for building and executing the benchmark programs, which uses the C++ API.
+
+By default the benchmark programs will be linked against the TileDB library in the `TileDB/dist` directory (from step 1 above), so make sure you have a release version installed there.
 
 ## Adding benchmarks
 
