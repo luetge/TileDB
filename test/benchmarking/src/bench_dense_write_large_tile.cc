@@ -43,11 +43,13 @@ class Benchmark : public BenchmarkBase {
   virtual void setup() {
     ArraySchema schema(ctx_, TILEDB_DENSE);
     Domain domain(ctx_);
-    domain.add_dimension(Dimension::create<int32_t>(ctx_, "d1", {{1, 7000}}));
-    domain.add_dimension(Dimension::create<int32_t>(ctx_, "d2", {{1, 7000}}));
+    domain.add_dimension(
+        Dimension::create<uint32_t>(ctx_, "d1", {{1, array_rows}}));
+    domain.add_dimension(
+        Dimension::create<uint32_t>(ctx_, "d2", {{1, array_cols}}));
     schema.set_domain(domain);
-    schema.add_attribute(Attribute::create<std::vector<int32_t>>(
-        ctx_, "a", {TILEDB_BLOSC_LZ4, 5}));
+    schema.add_attribute(
+        Attribute::create<int32_t>(ctx_, "a", {TILEDB_BLOSC_LZ4, 5}));
     Array::create(array_uri_, schema);
   }
 
@@ -58,10 +60,23 @@ class Benchmark : public BenchmarkBase {
   }
 
   virtual void run() {
+    Array array(ctx_, array_uri_, TILEDB_WRITE);
+    Query query(ctx_, array, TILEDB_WRITE);
+    std::vector<int> data;
+    data.resize(array_rows * array_cols);
+    for (uint64_t i = 0; i < data.size(); i++) {
+      data[i] = i;
+    }
+    query.set_subarray({1u, array_rows, 1u, array_cols})
+        .set_layout(TILEDB_ROW_MAJOR)
+        .set_buffer("a", data);
+    query.submit();
+    array.close();
   }
 
  private:
   const std::string array_uri_ = "bench_array";
+  const unsigned array_rows = 8000, array_cols = 8000;
 
   Context ctx_;
 };

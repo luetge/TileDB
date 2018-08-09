@@ -24,6 +24,14 @@ elif os.name == 'nt':
     libtiledb_name = 'tiledb.dll'
 
 
+def sync_fs():
+    """Syncs local filesystem pending writes."""
+    if os_name == 'nt':
+        print('WARNING: FS sync unimplemented')
+    else:
+        subprocess.call(['sudo', 'sync'])
+
+
 def drop_fs_caches():
     """Drops local filesystem caches."""
     if os_name == 'linux':
@@ -101,6 +109,8 @@ def run_benchmarks(args):
 
         times_ms = []
         for i in range(0, NUM_TRIALS):
+            sync_fs()
+            drop_fs_caches()
             output_json = subprocess.check_output([exe, 'run'],
                                                   cwd=benchmark_build_dir)
             result = json.loads(output_json)
