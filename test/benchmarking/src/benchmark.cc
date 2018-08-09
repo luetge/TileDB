@@ -85,6 +85,8 @@ void BenchmarkBase::teardown_base() {
 }
 
 void BenchmarkBase::setup_base() {
+  teardown();
+
   auto t0 = std::chrono::steady_clock::now();
   setup();
   auto t1 = std::chrono::steady_clock::now();
