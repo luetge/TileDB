@@ -69,6 +69,13 @@ install:
         popd;
       fi
 
+    # Build the benchmarks (but do not run them).
+    - |
+      pushd $TRAVIS_BUILD_DIR/test/benchmarking
+      mkdir build && cd build
+      cmake -DCMAKE_PREFIX_PATH=$TRAVIS_BUILD_DIR/dist .. && make
+      popd
+
 script:
     - if [[ "$TRAVIS_OS_NAME" == "linux" ]]; then
         make check-format;
