@@ -53,16 +53,20 @@ def find_tiledb_path(args):
 
 
 def list_benchmarks(show=False):
-    """Returns a list of benchmarks."""
+    """Returns a list of benchmark program names."""
     executables = glob.glob(os.path.join(benchmark_build_dir, 'bench_*'))
-    if show:
-        print('{} benchmarks:'.format(len(executables)))
     names = []
     for exe in sorted(executables):
-        name = os.path.basename(exe)
-        names.append(name)
-        if show:
+        is_exec = os.path.isfile(exe) and os.access(exe, os.X_OK)
+        if is_exec:
+            name = os.path.basename(exe)
+            names.append(name)
+
+    if show:
+        print('{} benchmarks:'.format(len(names)))
+        for name in names:
             print('  {}'.format(name))
+
     return names
 
 
@@ -93,16 +97,17 @@ def run_benchmarks(args):
     results = {}
     for b in benchmarks:
         exe = os.path.join(benchmark_build_dir, b)
-        subprocess.check_output([exe, 'setup'])
+        subprocess.check_output([exe, 'setup'], cwd=benchmark_build_dir)
 
         times_ms = []
         for i in range(0, NUM_TRIALS):
-            output_json = subprocess.check_output([exe, 'run'])
+            output_json = subprocess.check_output([exe, 'run'],
+                                                  cwd=benchmark_build_dir)
             result = json.loads(output_json)
             times_ms.append(result['ms'])
         results[b] = times_ms
 
-        subprocess.check_output([exe, 'teardown'])
+        subprocess.check_output([exe, 'teardown'], cwd=benchmark_build_dir)
 
     print_results(results)
 

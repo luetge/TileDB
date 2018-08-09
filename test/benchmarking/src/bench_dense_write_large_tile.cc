@@ -25,6 +25,9 @@
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN
  * THE SOFTWARE.
  *
+ * @section DESCRIPTION
+ *
+ * Benchmarks compressed dense 2D write performance with "large" tiles.
  */
 
 #include <chrono>
@@ -33,26 +36,34 @@
 
 #include "benchmark.h"
 
+using namespace tiledb;
+
 class Benchmark : public BenchmarkBase {
  protected:
   virtual void setup() {
-    // Create an array.
+    ArraySchema schema(ctx_, TILEDB_DENSE);
+    Domain domain(ctx_);
+    domain.add_dimension(Dimension::create<int32_t>(ctx_, "d1", {{1, 7000}}));
+    domain.add_dimension(Dimension::create<int32_t>(ctx_, "d2", {{1, 7000}}));
+    schema.set_domain(domain);
+    schema.add_attribute(Attribute::create<std::vector<int32_t>>(
+        ctx_, "a", {TILEDB_BLOSC_LZ4, 5}));
+    Array::create(array_uri_, schema);
   }
 
   virtual void teardown() {
-    tiledb::VFS vfs(ctx_);
-    if (vfs.is_dir(array_uri))
-      vfs.remove_dir(array_uri);
+    VFS vfs(ctx_);
+    if (vfs.is_dir(array_uri_))
+      vfs.remove_dir(array_uri_);
   }
 
   virtual void run() {
-    std::this_thread::sleep_for(std::chrono::milliseconds(1230));
   }
 
  private:
-  const std::string array_uri = "bench_array";
+  const std::string array_uri_ = "bench_array";
 
-  tiledb::Context ctx_;
+  Context ctx_;
 };
 
 int main(int argc, char** argv) {
