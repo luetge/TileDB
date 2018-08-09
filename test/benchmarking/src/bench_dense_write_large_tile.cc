@@ -68,7 +68,7 @@ class Benchmark : public BenchmarkBase {
 
   virtual void run() {
     Array array(ctx_, array_uri_, TILEDB_WRITE);
-    Query query(ctx_, array, TILEDB_WRITE);
+    Query query(ctx_, array);
     query.set_subarray({1u, array_rows, 1u, array_cols})
         .set_layout(TILEDB_ROW_MAJOR)
         .set_buffer("a", data_);
