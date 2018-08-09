@@ -26,7 +26,7 @@ elif os.name == 'nt':
 
 def sync_fs():
     """Syncs local filesystem pending writes."""
-    if os_name == 'nt':
+    if os_name == 'windows':
         print('WARNING: FS sync unimplemented')
     else:
         subprocess.call(['sudo', 'sync'])
