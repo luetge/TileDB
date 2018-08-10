@@ -179,9 +179,10 @@ tiledb::sm::Status submit_query_to_rest(
 
   // Build the url
   char* uri_escaped = curl_easy_escape(curl, uri.c_str(), uri.length());
-  std::string url = std::string(rest_server) +
-                    "/v1/queries/group/group1/project/project1/uri/" +
-                    uri_escaped + "/submit";
+  std::string url = std::string(rest_server) + "/v1/queries/type/" +
+                    tiledb::sm::query_type_str(query->type()) +
+                    "/group/group1/project/project1/uri/" + uri_escaped +
+                    "/submit";
   curl_free(uri_escaped);
 
   struct MemoryStruct returned_data;
@@ -233,9 +234,10 @@ tiledb::sm::Status finalize_query_to_rest(
 
   // Build the url
   char* uri_escaped = curl_easy_escape(curl, uri.c_str(), uri.length());
-  std::string url = std::string(rest_server) +
-                    "/v1/queries/group/group1/project/project1/uri/" +
-                    uri_escaped + "/finalize";
+  std::string url = std::string(rest_server) + "/v1/queries/type/" +
+                    tiledb::sm::query_type_str(query->type()) +
+                    "/group/group1/project/project1/uri/" + uri_escaped +
+                    "/finalize";
   curl_free(uri_escaped);
 
   struct MemoryStruct returned_data;
