@@ -92,7 +92,7 @@ AttributeBuffer Writer::buffer(const std::string& attribute) const {
 
 Status Writer::capnp(::Writer::Builder* writerBuilder) const {
   STATS_FUNC_IN(serialization_writer_capnp);
-  ::GlobalWriteState::Builder globalWriteStateBuilder =
+  /*::GlobalWriteState::Builder globalWriteStateBuilder =
       writerBuilder->initGlobalWriteState();
   if (global_write_state_ != nullptr) {
     ::MapInt64::Builder cellsWriterBuilder =
@@ -127,7 +127,7 @@ Status Writer::capnp(::Writer::Builder* writerBuilder) const {
         return status;
       i++;
     }
-  }
+  }*/
   writerBuilder->setCheckCoordDups(check_coord_dups_);
   writerBuilder->setDedupCoords(dedup_coords_);
   writerBuilder->setInitialized(initialized_);
