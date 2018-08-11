@@ -593,13 +593,13 @@ tiledb::sm::Status array_schema_serialize(
         break;
       }
       case tiledb::sm::SerializationType::CAPNP: {
-        auto protomessage = messageToFlatArray(message);
+        kj::Array<capnp::word> protomessage = messageToFlatArray(message);
         kj::ArrayPtr<const char> message_chars = protomessage.asChars();
         *serialized_string = new char[message_chars.size()];
         memcpy(
             *serialized_string,
             message_chars.begin(),
-            sizeof(char) * message_chars.size());
+            message_chars.size());
         *serialized_string_length = message_chars.size();
         break;
       }
