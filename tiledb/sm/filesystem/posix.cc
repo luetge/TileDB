@@ -144,7 +144,7 @@ Status Posix::create_dir(const std::string& path) const {
         std::string("Cannot create directory '") + path +
         "'; Directory already exists"));
   }
-  if (mkdir(path.c_str(), S_IRWXU) != 0) {
+  if (mkdir(path.c_str(), vfs_params_.file_params_.creation_permission_) != 0) {
     return LOG_STATUS(Status::IOError(
         std::string("Cannot create directory '") + path + "'; " +
         strerror(errno)));
@@ -153,7 +153,7 @@ Status Posix::create_dir(const std::string& path) const {
 }
 
 Status Posix::touch(const std::string& filename) const {
-  int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_SYNC, S_IRWXU);
+  int fd = ::open(filename.c_str(), O_WRONLY | O_CREAT | O_SYNC, vfs_params_.file_params_.creation_permission_);
   if (fd == -1 || ::close(fd) != 0) {
     return LOG_STATUS(Status::IOError(
         std::string("Failed to create file '") + filename + "'; " +
@@ -411,9 +411,9 @@ Status Posix::sync(const std::string& path) {
   // Open file
   int fd = -1;
   if (is_dir(path))  // DIRECTORY
-    fd = open(path.c_str(), O_RDONLY, S_IRWXU);
+    fd = open(path.c_str(), O_RDONLY, vfs_params_.file_params_.creation_permission_);
   else if (is_file(path))  // FILE
-    fd = open(path.c_str(), O_WRONLY | O_APPEND | O_CREAT, S_IRWXU);
+    fd = open(path.c_str(), O_WRONLY | O_APPEND | O_CREAT, vfs_params_.file_params_.creation_permission_);
   else
     return Status::Ok();  // If file does not exist, exit
 
@@ -450,7 +450,7 @@ Status Posix::write(
   }
 
   // Open or create file.
-  int fd = open(path.c_str(), O_WRONLY | O_CREAT, S_IRWXU);
+  int fd = open(path.c_str(), O_WRONLY | O_CREAT, vfs_params_.file_params_.creation_permission_);
   if (fd == -1) {
     return LOG_STATUS(Status::IOError(
         std::string("Cannot open file '") + path + "'; " + strerror(errno)));
