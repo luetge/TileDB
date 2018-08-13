@@ -185,6 +185,9 @@ extern const uint64_t vfs_num_threads;
 /** The default minimum number of bytes in a parallel VFS operation. */
 extern const uint64_t vfs_min_parallel_size;
 
+/** The permission of created files. */
+extern const int vfs_file_creation_permission;
+
 /** The default maximum number of parallel file:/// operations. */
 extern const uint64_t vfs_file_max_parallel_ops;
 

@@ -33,6 +33,7 @@
 #include <cstdint>
 #include <limits>
 #include <thread>
+#include <sys/stat.h>
 
 #ifdef HAVE_TBB
 #include <tbb/task_scheduler_init.h>
@@ -197,6 +198,9 @@ const uint64_t vfs_num_threads = std::thread::hardware_concurrency();
 
 /** The default minimum number of bytes in a parallel VFS operation. */
 const uint64_t vfs_min_parallel_size = 10 * 1024 * 1024;
+
+/** The permission of created files. */
+const int vfs_file_creation_permission = S_IRWXU;
 
 /** The default maximum number of parallel file:/// operations. */
 const uint64_t vfs_file_max_parallel_ops = vfs_num_threads;

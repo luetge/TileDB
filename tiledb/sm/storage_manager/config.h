@@ -135,9 +135,11 @@ class Config {
 
   struct FileParams {
     uint64_t max_parallel_ops_;
+    int creation_permission_;
 
     FileParams() {
       max_parallel_ops_ = constants::vfs_file_max_parallel_ops;
+      creation_permission_ = constants::vfs_file_creation_permission;
     }
   };
 
@@ -415,6 +417,9 @@ class Config {
 
   /** Sets the min number of bytes of a VFS parallel operation. */
   Status set_vfs_min_parallel_size(const std::string& value);
+
+  /** Sets the permission of newly created files. */
+  Status set_vfs_file_creation_permission(const std::string& value);
 
   /** Sets the max number of allowed file:/// parallel operations. */
   Status set_vfs_file_max_parallel_ops(const std::string& value);
