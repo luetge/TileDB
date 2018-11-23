@@ -70,14 +70,11 @@ KVItem& KVItem::operator=(const KVItem& kv_item) {
 /* ********************************* */
 
 void KVItem::clear() {
-  if (key_.key_ != nullptr) {
-    std::free(key_.key_);
-    key_.key_ = nullptr;
-  }
+  std::free(key_.key_);
+  key_.key_ = nullptr;
 
   for (auto& v : values_) {
-    if ((v.second)->value_ != nullptr)
-      std::free((v.second)->value_);
+    std::free((v.second)->value_);
     delete v.second;
   }
   values_.clear();
@@ -95,8 +92,7 @@ Status KVItem::good(
   for (unsigned i = 0; i < attribute_num; ++i) {
     // Skip the special attributes
     if (attributes[i] == constants::coords ||
-        attributes[i] == constants::key_attr_name ||
-        attributes[i] == constants::key_type_attr_name)
+        attributes[i] == constants::key_attr_name)
       continue;
 
     auto it = values_.find(attributes[i]);
@@ -145,8 +141,7 @@ Status KVItem::set_key(
     return LOG_STATUS(
         Status::KVItemError("Cannot add key; Key cannot be empty"));
 
-  if (key_.key_ != nullptr)
-    std::free(key_.key_);
+  std::free(key_.key_);
   key_.key_ = std::malloc(key_size);
   if (key_.key_ == nullptr)
     return LOG_STATUS(
@@ -179,8 +174,7 @@ Status KVItem::set_value(
   // Delete previous value buffer
   auto it = values_.find(attribute);
   if (it != values_.end()) {
-    if (it->second->value_ != nullptr)
-      std::free(it->second->value_);
+    std::free(it->second->value_);
     delete it->second;
     values_.erase(it);
   }

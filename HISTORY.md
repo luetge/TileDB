@@ -1,3 +1,119 @@
+# TileDB v1.4.1 Release Notes
+
+## Bug fixes
+
+* Fixed bug in incomplete queries, which should always return partial results. An incomplete status with 0 returned results must always mean that the buffers cannot even fit a single cell value. [#1056](https://github.com/TileDB-Inc/TileDB/pull/1056)
+* Fixed performance bug during global order write finalization. [#1065](https://github.com/TileDB-Inc/TileDB/pull/1065)
+* Fixed error in linking against static TileDB on Windows. [#1058](https://github.com/TileDB-Inc/TileDB/pull/1058)
+* Fixed build error when building without TBB. [#1051](https://github.com/TileDB-Inc/TileDB/pull/1051)
+
+## Improvements
+
+* Set LZ4, Zlib and Zstd compressors to build in release mode. [#1034](https://github.com/TileDB-Inc/TileDB/pull/1034)
+* Changed coordinates to always be split before filtering. [#1054](https://github.com/TileDB-Inc/TileDB/pull/1054) 
+* Added type-safe filter option methods to C++ API. [#1062](https://github.com/TileDB-Inc/TileDB/pull/1062)
+
+# TileDB v1.4.0 Release Notes
+
+The 1.4.0 release brings two new major features, attribute filter lists and at-rest array encryption, along with bugfixes and performance improvements.
+
+**Note:** TileDB v1.4.0 changes the on-disk array format. Existing arrays should be re-written using TileDB v1.4.0 before use. Starting from v1.4.0 and on, backwards compatibility for reading old-versioned arrays will be fully supported.
+
+## New features
+
+* All array data can now be encrypted at rest using AES-256-GCM symmetric encryption. [#968](https://github.com/TileDB-Inc/TileDB/pull/968)
+* Negative and real-valued domain types are now fully supported. [#885](https://github.com/TileDB-Inc/TileDB/pull/885)
+* New filter API for transforming attribute data with an ordered list of filters. [#912](https://github.com/TileDB-Inc/TileDB/pull/912)
+* Current filters include: previous compressors, bit width reduction, bitshuffle, byteshuffle, and positive-delta encoding.
+    * The bitshuffle filter uses an implementation by [Kiyoshi Masui](https://github.com/kiyo-masui/bitshuffle).
+    * The byteshuffle filter uses an implementation by [Francesc Alted](https://github.com/Blosc/c-blosc) (from the Blosc project).
+* Arrays can now be opened at specific timestamps. [#984](https://github.com/TileDB-Inc/TileDB/pull/984)
+
+## Deprecations
+
+* The C and C++ APIs for compression have been deprecated. The corresponding filter API should be used instead. The compression API will be removed in a future TileDB version. [#1008](https://github.com/TileDB-Inc/TileDB/pull/1008)
+* Removed Blosc compressors (obviated by byteshuffle -> compressor filter list).
+
+## Bug fixes
+
+* Fix issue where performing a read query with empty result could cause future reads to return empty [#882](https://github.com/TileDB-Inc/TileDB/pull/882)
+* Fix TBB initialization bug with multiple contexts [#898](https://github.com/TileDB-Inc/TileDB/pull/898) 
+* Fix bug in max buffer sizes estimation [#903](https://github.com/TileDB-Inc/TileDB/pull/903)
+* Fix Buffer allocation size being incorrectly set on realloc [#911](https://github.com/TileDB-Inc/TileDB/pull/911)
+
+## Improvements
+
+* Added check if the coordinates fall out-of-bounds (i.e., outside the array domain) during sparse writes, and added config param `sm.check_coord_oob` to enable/disable the check (enabled by default). [#996](https://github.com/TileDB-Inc/TileDB/pull/996)
+* Add config params `sm.num_reader_threads` and `sm.num_writer_threads` for separately controlling I/O parallelism from compression parallelism.
+* Added contribution guidelines [#899](https://github.com/TileDB-Inc/TileDB/pull/899)
+* Enable building TileDB in Cygwin environment on Windows [#890](https://github.com/TileDB-Inc/TileDB/pull/890)
+* Added a simple benchmarking script and several benchmark programs [#889](https://github.com/TileDB-Inc/TileDB/pull/889)
+* Changed C API and disk format integer types to have explicit bit widths. [#981](https://github.com/TileDB-Inc/TileDB/pull/981)
+
+## API additions
+
+### C API
+
+* Added `tiledb_{array,kv}_open_at`, `tiledb_{array,kv}_open_at_with_key` and `tiledb_{array,kv}_reopen_at`.
+* Added `tiledb_{array,kv}_get_timestamp()`.
+* Added `tiledb_kv_is_open`
+* Added `tiledb_filter_t` `tiledb_filter_type_t`, `tiledb_filter_option_t`, and `tiledb_filter_list_t` types
+* Added `tiledb_filter_*` and `tiledb_filter_list_*` functions.
+* Added `tiledb_attribute_{set,get}_filter_list`, `tiledb_array_schema_{set,get}_coords_filter_list`, `tiledb_array_schema_{set,get}_offsets_filter_list` functions.
+* Added `tiledb_query_get_buffer` and `tiledb_query_get_buffer_var`.
+* Added `tiledb_array_get_uri`
+* Added `tiledb_encryption_type_t`
+* Added `tiledb_array_create_with_key`, `tiledb_array_open_with_key`, `tiledb_array_schema_load_with_key`, `tiledb_array_consolidate_with_key`
+* Added `tiledb_kv_create_with_key`, `tiledb_kv_open_with_key`, `tiledb_kv_schema_load_with_key`, `tiledb_kv_consolidate_with_key`
+
+### C++ API
+
+* Added encryption overloads for `Array()`, `Array::open()`, `Array::create()`, `ArraySchema()`, `Map()`, `Map::open()`, `Map::create()` and `MapSchema()`.
+* Added `Array::timestamp()` and `Array::reopen_at()` methods.
+* Added `Filter` and `FilterList` classes
+* Added `Attribute::filter_list()`, `Attribute::set_filter_list()`, `ArraySchema::coords_filter_list()`, `ArraySchema::set_coords_filter_list()`, `ArraySchema::offsets_filter_list()`, `ArraySchema::set_offsets_filter_list()` functions.
+* Added overloads for `Array()`, `Array::open()`, `Map()`, `Map::open()` for handling timestamps.
+
+## Breaking changes
+
+### C API
+
+* Removed Blosc compressors.
+* Removed `tiledb_kv_set_max_buffered_items`.
+* Modified `tiledb_kv_open` to not take an attribute subselection, but instead take as input the 
+query type (similar to arrays). This makes the key-value store behave similarly to arrays,
+which means that the key-value store does not support interleaved reads/writes any more
+(an opened key-value store is used either for reads or writes, but not both).   
+* `tiledb_kv_close` does not flush the written items. Instead, `tiledb_kv_flush` must be
+invoked explicitly.
+
+### C++ API
+
+* Removed Blosc compressors.
+* Removed `Map::set_max_buffered_items`.
+* Modified `Map::Map` and `Map::open` to not take an attribute subselection, but instead take as input the 
+query type (similar to arrays). This makes the key-value store behave similarly to arrays,
+which means that the key-value store does not support interleaved reads/writes any more
+(an opened key-value store is used either for reads or writes, but not both).   
+* `Map::close` does not flush the written items. Instead, `Map::flush` must be
+invoked explicitly.
+
+# TileDB v1.3.2 Release Notes
+
+## Bug fixes
+
+* Fix read query bug from multiple fragments when query layout differs from array layout [#869](https://github.com/TileDB-Inc/TileDB/pull/869)
+* Fix error when consolidating empty arrays [#861](https://github.com/TileDB-Inc/TileDB/pull/861)
+* Fix bzip2 external project URL [#875](https://github.com/TileDB-Inc/TileDB/pull/875)
+* Invalidate cached buffer sizes when query subarray changes [#882](https://github.com/TileDB-Inc/TileDB/pull/882)
+
+## Improvements
+
+* Add check to ensure tile extent greater than zero [#866](https://github.com/TileDB-Inc/TileDB/pull/866)
+* Add `TILEDB_INSTALL_LIBDIR` CMake option [#858](https://github.com/TileDB-Inc/TileDB/pull/858)
+* Remove `TILEDB_USE_STATIC_*` CMake variables from build [#871](https://github.com/TileDB-Inc/TileDB/pull/871)
+* Allow HDFS init to succeed even if libhdfs is not found [#873](https://github.com/TileDB-Inc/TileDB/pull/873)
+
 # TileDB v1.3.1 Release Notes
 
 ## Bug fixes

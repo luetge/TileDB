@@ -56,20 +56,26 @@ class Config {
     uint64_t fragment_metadata_cache_size_;
     bool enable_signal_handlers_;
     uint64_t num_async_threads_;
+    uint64_t num_reader_threads_;
+    uint64_t num_writer_threads_;
     int num_tbb_threads_;
     uint64_t tile_cache_size_;
     bool dedup_coords_;
     bool check_coord_dups_;
+    bool check_coord_oob_;
 
     SMParams() {
       array_schema_cache_size_ = constants::array_schema_cache_size;
       fragment_metadata_cache_size_ = constants::fragment_metadata_cache_size;
       enable_signal_handlers_ = constants::enable_signal_handlers;
       num_async_threads_ = constants::num_async_threads;
+      num_reader_threads_ = constants::num_reader_threads;
+      num_writer_threads_ = constants::num_writer_threads;
       num_tbb_threads_ = constants::num_tbb_threads;
       tile_cache_size_ = constants::tile_cache_size;
       dedup_coords_ = false;
       check_coord_dups_ = true;
+      check_coord_oob_ = true;
     }
   };
 
@@ -190,6 +196,10 @@ class Config {
    *    duplicates, the duplicates will be written without errors, but the
    *    TileDB behavior could be unpredictable. <br>
    *    **Default**: true
+   * - `sm.check_coord_oob` <br>
+   *    If `true`, an error will be thrown if there are cells with coordinates
+   *    falling outside the array domain during sparse array writes. <br>
+   *    **Default**: true
    * - `sm.tile_cache_size` <br>
    *    The tile cache size in bytes. Any `uint64_t` value is acceptable. <br>
    *    **Default**: 10,000,000
@@ -206,6 +216,12 @@ class Config {
    *    **Default**: true
    * - `sm.num_async_threads` <br>
    *    The number of threads allocated for async queries. <br>
+   *    **Default**: 1
+   * - `sm.num_reader_threads` <br>
+   *    The number of threads allocated for filesystem read operations. <br>
+   *    **Default**: 1
+   * - `sm.num_writer_threads` <br>
+   *    The number of threads allocated for filesystem write operations. <br>
    *    **Default**: 1
    * - `sm.num_tbb_threads` <br>
    *    The number of threads allocated for the TBB thread pool (if TBB is
@@ -348,6 +364,9 @@ class Config {
   /** Sets the check for coordinates duplicates parameter. */
   Status set_sm_check_coord_dups(const std::string& value);
 
+  /** Sets the check for out-of-bound coordinates parameter. */
+  Status set_sm_check_coord_oob(const std::string& value);
+
   /** Sets the array metadata cache size, properly parsing the input value. */
   Status set_sm_array_schema_cache_size(const std::string& value);
 
@@ -359,6 +378,12 @@ class Config {
 
   /** Sets the number of threads, properly parsing the input value.*/
   Status set_sm_num_async_threads(const std::string& value);
+
+  /** Sets the number of threads, properly parsing the input value.*/
+  Status set_sm_num_reader_threads(const std::string& value);
+
+  /** Sets the number of threads, properly parsing the input value.*/
+  Status set_sm_num_writer_threads(const std::string& value);
 
   /** Sets the number of TBB threads, properly parsing the input value.*/
   Status set_sm_num_tbb_threads(const std::string& value);

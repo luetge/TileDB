@@ -35,6 +35,7 @@ set(INHERITED_CMAKE_ARGS
   -DTILEDB_TBB_SHARED=${TILEDB_TBB_SHARED}
   -DTILEDB_STATIC=${TILEDB_STATIC}
   -DTILEDB_TESTS=${TILEDB_TESTS}
+  -DTILEDB_INSTALL_LIBDIR=${TILEDB_INSTALL_LIBDIR}
 )
 
 if (TILEDB_TESTS)
@@ -59,7 +60,6 @@ endif()
 # These includes modify the TILEDB_EXTERNAL_PROJECTS and FORWARD_EP_CMAKE_ARGS
 # variables.
 
-include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/FindBlosc_EP.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/FindBzip2_EP.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/FindLZ4_EP.cmake)
 include(${CMAKE_CURRENT_SOURCE_DIR}/cmake/Modules/FindSpdlog_EP.cmake)

@@ -125,9 +125,42 @@ class ArraySchema : public Schema {
    * @param uri URI of array
    */
   ArraySchema(const Context& ctx, const std::string& uri)
+      : ArraySchema(ctx, uri, TILEDB_NO_ENCRYPTION, nullptr, 0) {
+  }
+
+  /**
+   * Loads the schema of an existing encrypted array.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * tiledb::Context ctx;
+   * tiledb::ArraySchema schema(ctx, "s3://bucket-name/array-name",
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * @endcode
+   *
+   * @param ctx TileDB context
+   * @param uri URI of array
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   */
+  ArraySchema(
+      const Context& ctx,
+      const std::string& uri,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length)
       : Schema(ctx) {
     tiledb_array_schema_t* schema;
-    ctx.handle_error(tiledb_array_schema_load(ctx, uri.c_str(), &schema));
+    ctx.handle_error(tiledb_array_schema_load_with_key(
+        ctx,
+        uri.c_str(),
+        encryption_type,
+        encryption_key,
+        key_length,
+        &schema));
     schema_ = std::shared_ptr<tiledb_array_schema_t>(schema, deleter_);
   }
 
@@ -145,9 +178,9 @@ class ArraySchema : public Schema {
 
   ArraySchema() = default;
   ArraySchema(const ArraySchema&) = default;
-  ArraySchema(ArraySchema&& o) = default;
+  ArraySchema(ArraySchema&&) = default;
   ArraySchema& operator=(const ArraySchema&) = default;
-  ArraySchema& operator=(ArraySchema&& o) = default;
+  ArraySchema& operator=(ArraySchema&&) = default;
 
   /* ********************************* */
   /*                API                */
@@ -260,15 +293,12 @@ class ArraySchema : public Schema {
    * coordinate compressor, use `set_coords_compressor()`.
    *
    * @return Copy of the coordinates Compressor.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  Compressor coords_compressor() const {
-    auto& ctx = ctx_.get();
-    tiledb_compressor_t compressor;
-    int level;
-    ctx.handle_error(tiledb_array_schema_get_coords_compressor(
-        ctx, schema_.get(), &compressor, &level));
-    Compressor cmp(compressor, level);
-    return cmp;
+  TILEDB_DEPRECATED Compressor coords_compressor() const {
+    return get_compressor(coords_filter_list());
   }
 
   /**
@@ -283,11 +313,22 @@ class ArraySchema : public Schema {
    *
    * @param c Compressor to use
    * @return Reference to this `ArraySchema` instance.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  ArraySchema& set_coords_compressor(const Compressor& c) {
+  TILEDB_DEPRECATED ArraySchema& set_coords_compressor(const Compressor& c) {
+    if (coords_filter_list().nfilters() > 0)
+      throw TileDBError(
+          "[TileDB::C++API] Error: Cannot add second filter with "
+          "deprecated API.");
+
     auto& ctx = ctx_.get();
-    ctx.handle_error(tiledb_array_schema_set_coords_compressor(
-        ctx, schema_.get(), c.compressor(), c.level()));
+    FilterList filter_list(ctx);
+    Filter filter(ctx, Compressor::to_filter(c.compressor()));
+    int32_t level = c.level();
+    filter.set_option(TILEDB_COMPRESSION_LEVEL, &level);
+    set_coords_filter_list(filter_list);
     return *this;
   }
 
@@ -296,15 +337,12 @@ class ArraySchema : public Schema {
    * attributes. To change the compressor, use `set_offsets_compressor()`.
    *
    * @return Copy of the offsets Compressor.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  Compressor offsets_compressor() const {
-    auto& ctx = ctx_.get();
-    tiledb_compressor_t compressor;
-    int level;
-    ctx.handle_error(tiledb_array_schema_get_offsets_compressor(
-        ctx, schema_.get(), &compressor, &level));
-    Compressor cmp(compressor, level);
-    return cmp;
+  TILEDB_DEPRECATED Compressor offsets_compressor() const {
+    return get_compressor(offsets_filter_list());
   }
 
   /**
@@ -319,11 +357,100 @@ class ArraySchema : public Schema {
    *
    * @param c Compressor to use
    * @return Reference to this `ArraySchema` instance.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  ArraySchema& set_offsets_compressor(const Compressor& c) {
+  TILEDB_DEPRECATED ArraySchema& set_offsets_compressor(const Compressor& c) {
+    if (offsets_filter_list().nfilters() > 0)
+      throw TileDBError(
+          "[TileDB::C++API] Error: Cannot add second filter with "
+          "deprecated API.");
+
     auto& ctx = ctx_.get();
-    ctx.handle_error(tiledb_array_schema_set_offsets_compressor(
-        ctx, schema_.get(), c.compressor(), c.level()));
+    FilterList filter_list(ctx);
+    Filter filter(ctx, Compressor::to_filter(c.compressor()));
+    int32_t level = c.level();
+    filter.set_option(TILEDB_COMPRESSION_LEVEL, &level);
+    set_offsets_filter_list(filter_list);
+    return *this;
+  }
+
+  /**
+   * Returns a copy of the FilterList of the coordinates. To change the
+   * coordinate compressor, use `set_coords_filter_list()`.
+   *
+   * @return Copy of the coordinates FilterList.
+   */
+  FilterList coords_filter_list() const {
+    auto& ctx = ctx_.get();
+    tiledb_filter_list_t* filter_list;
+    ctx.handle_error(tiledb_array_schema_get_coords_filter_list(
+        ctx, schema_.get(), &filter_list));
+    return FilterList(ctx, filter_list);
+  }
+
+  /**
+   * Sets the FilterList for the coordinates, which is an ordered list of
+   * filters that will be used to process and/or transform the coordinate data
+   * (such as compression).
+   *
+   * **Example:**
+   * @code{.cpp}
+   * tiledb::Context ctx;
+   * tiledb::ArraySchema schema(ctx, TILEDB_SPARSE);
+   * tiledb::FilterList filter_list(ctx);
+   * filter_list.add_filter({ctx, TILEDB_FILTER_BYTESHUFFLE})
+   *     .add_filter({ctx, TILEDB_FILTER_BZIP2});
+   * schema.set_coords_filter_list(filter_list);
+   * @endcode
+   *
+   * @param filter_list FilterList to use
+   * @return Reference to this `ArraySchema` instance.
+   */
+  ArraySchema& set_coords_filter_list(const FilterList& filter_list) {
+    auto& ctx = ctx_.get();
+    ctx.handle_error(tiledb_array_schema_set_coords_filter_list(
+        ctx, schema_.get(), filter_list));
+    return *this;
+  }
+
+  /**
+   * Returns a copy of the FilterList of the offsets. To change the
+   * offsets compressor, use `set_offsets_filter_list()`.
+   *
+   * @return Copy of the offsets FilterList.
+   */
+  FilterList offsets_filter_list() const {
+    auto& ctx = ctx_.get();
+    tiledb_filter_list_t* filter_list;
+    ctx.handle_error(tiledb_array_schema_get_offsets_filter_list(
+        ctx, schema_.get(), &filter_list));
+    return FilterList(ctx, filter_list);
+  }
+
+  /**
+   * Sets the FilterList for the offsets, which is an ordered list of
+   * filters that will be used to process and/or transform the offsets data
+   * (such as compression).
+   *
+   * **Example:**
+   * @code{.cpp}
+   * tiledb::Context ctx;
+   * tiledb::ArraySchema schema(ctx, TILEDB_SPARSE);
+   * tiledb::FilterList filter_list(ctx);
+   * filter_list.add_filter({ctx, TILEDB_FILTER_POSITIVE_DELTA})
+   *     .add_filter({ctx, TILEDB_FILTER_LZ4});
+   * schema.set_offsets_filter_list(filter_list);
+   * @endcode
+   *
+   * @param filter_list FilterList to use
+   * @return Reference to this `ArraySchema` instance.
+   */
+  ArraySchema& set_offsets_filter_list(const FilterList& filter_list) {
+    auto& ctx = ctx_.get();
+    ctx.handle_error(tiledb_array_schema_set_offsets_filter_list(
+        ctx, schema_.get(), filter_list));
     return *this;
   }
 
@@ -504,6 +631,40 @@ class ArraySchema : public Schema {
 
   /** The pointer to the C TileDB array schema object. */
   std::shared_ptr<tiledb_array_schema_t> schema_;
+
+  /**
+   * Helper function to get the compression filter, if one exists. This will be
+   * removed when Compressor is removed.
+   */
+  Compressor get_compressor(const FilterList& filters) const {
+    for (uint32_t i = 0; i < filters.nfilters(); i++) {
+      auto f = filters.filter(i);
+      int32_t level;
+      switch (f.filter_type()) {
+        case TILEDB_FILTER_GZIP:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_GZIP, level};
+        case TILEDB_FILTER_ZSTD:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_ZSTD, level};
+        case TILEDB_FILTER_LZ4:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_LZ4, level};
+        case TILEDB_FILTER_RLE:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_RLE, level};
+        case TILEDB_FILTER_BZIP2:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_BZIP2, level};
+        case TILEDB_FILTER_DOUBLE_DELTA:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_DOUBLE_DELTA, level};
+        default:
+          continue;
+      }
+    }
+    return {TILEDB_NO_COMPRESSION, -1};
+  }
 };
 
 /* ********************************* */

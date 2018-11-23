@@ -39,6 +39,7 @@
 #include "context.h"
 #include "deleter.h"
 #include "exception.h"
+#include "filter_list.h"
 #include "object.h"
 #include "tiledb.h"
 #include "type.h"
@@ -80,7 +81,9 @@ namespace tiledb {
  * auto a3 = tiledb::Attribute::create<float[3]>(ctx, "a3");
  *
  * // Change compression scheme
- * a1.set_compressor({TILEDB_BLOSC, -1});
+ * tiledb::FilterList filters(ctx);
+ * filters.add_filter({ctx, TILEDB_FILTER_BZIP2});
+ * a1.set_filter_list(filters);
  *
  * // Add attributes to a schema
  * tiledb::ArraySchema schema(ctx, TILEDB_DENSE);
@@ -111,21 +114,43 @@ class Attribute {
     init_from_type(name, type);
   }
 
-  /** Construct an attribute with an enumerated type and given compressor. */
-  Attribute(
+  /**
+   * Construct an attribute with an enumerated type and given compressor.
+   *
+   * @note This constructor is deprecated and will be removed in a future
+   *    version. The filter API should be used instead.
+   */
+  TILEDB_DEPRECATED Attribute(
       const Context& ctx,
       const std::string& name,
       tiledb_datatype_t type,
       const Compressor& compressor)
       : ctx_(ctx) {
     init_from_type(name, type);
-    set_compressor(compressor);
+
+    FilterList filter_list(ctx);
+    Filter filter(ctx, Compressor::to_filter(compressor.compressor()));
+    int32_t level = compressor.level();
+    filter.set_option(TILEDB_COMPRESSION_LEVEL, &level);
+    filter_list.add_filter(filter);
+    set_filter_list(filter_list);
   }
 
-  Attribute(const Attribute& attr) = default;
-  Attribute(Attribute&& o) = default;
+  /** Construct an attribute with an enumerated type and given filter list. */
+  Attribute(
+      const Context& ctx,
+      const std::string& name,
+      tiledb_datatype_t type,
+      const FilterList& filter_list)
+      : ctx_(ctx) {
+    init_from_type(name, type);
+    set_filter_list(filter_list);
+  }
+
+  Attribute(const Attribute&) = default;
+  Attribute(Attribute&&) = default;
   Attribute& operator=(const Attribute&) = default;
-  Attribute& operator=(Attribute&& o) = default;
+  Attribute& operator=(Attribute&&) = default;
 
   /* ********************************* */
   /*                API                */
@@ -227,15 +252,39 @@ class Attribute {
   /**
    * Returns a copy of the attribute compressor. To change the
    * attribute compressor, use `Attribute::set_compressor()`.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  Compressor compressor() const {
-    auto& ctx = ctx_.get();
-    tiledb_compressor_t compressor;
-    int level;
-    ctx.handle_error(
-        tiledb_attribute_get_compressor(ctx, attr_.get(), &compressor, &level));
-    Compressor cmp(compressor, level);
-    return cmp;
+  TILEDB_DEPRECATED Compressor compressor() const {
+    FilterList filters = filter_list();
+    for (uint32_t i = 0; i < filters.nfilters(); i++) {
+      auto f = filters.filter(i);
+      int32_t level;
+      switch (f.filter_type()) {
+        case TILEDB_FILTER_GZIP:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_GZIP, level};
+        case TILEDB_FILTER_ZSTD:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_ZSTD, level};
+        case TILEDB_FILTER_LZ4:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_LZ4, level};
+        case TILEDB_FILTER_RLE:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_RLE, level};
+        case TILEDB_FILTER_BZIP2:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_BZIP2, level};
+        case TILEDB_FILTER_DOUBLE_DELTA:
+          f.get_option(TILEDB_COMPRESSION_LEVEL, &level);
+          return {TILEDB_DOUBLE_DELTA, level};
+        default:
+          continue;
+      }
+    }
+    return {TILEDB_NO_COMPRESSION, -1};
   }
 
   /**
@@ -243,11 +292,52 @@ class Attribute {
    *
    * @param c Compressor to set
    * @return Reference to this Attribute
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
    */
-  Attribute& set_compressor(Compressor c) {
+  TILEDB_DEPRECATED Attribute& set_compressor(Compressor c) {
+    if (filter_list().nfilters() > 0)
+      throw TileDBError(
+          "[TileDB::C++API] Error: Cannot add second filter with "
+          "deprecated API.");
+
     auto& ctx = ctx_.get();
-    ctx.handle_error(tiledb_attribute_set_compressor(
-        ctx, attr_.get(), c.compressor(), c.level()));
+    FilterList filter_list(ctx);
+    Filter filter(ctx, Compressor::to_filter(c.compressor()));
+    int32_t level = c.level();
+    filter.set_option(TILEDB_COMPRESSION_LEVEL, &level);
+    filter_list.add_filter(filter);
+    set_filter_list(filter_list);
+    return *this;
+  }
+
+  /**
+   * Returns a copy of the FilterList of the attribute.
+   * To change the filter list, use `set_filter_list()`.
+   *
+   * @return Copy of the attribute FilterList.
+   */
+  FilterList filter_list() const {
+    auto& ctx = ctx_.get();
+    tiledb_filter_list_t* filter_list;
+    ctx.handle_error(
+        tiledb_attribute_get_filter_list(ctx, attr_.get(), &filter_list));
+    return FilterList(ctx, filter_list);
+  }
+
+  /**
+   * Sets the attribute filter list, which is an ordered list of filters that
+   * will be used to process and/or transform the attribute data (such as
+   * compression).
+   *
+   * @param filter_list Filter list to set
+   * @return Reference to this Attribute
+   */
+  Attribute& set_filter_list(const FilterList& filter_list) {
+    auto& ctx = ctx_.get();
+    ctx.handle_error(
+        tiledb_attribute_set_filter_list(ctx, attr_.get(), filter_list));
     return *this;
   }
 
@@ -321,14 +411,54 @@ class Attribute {
    * @param name The attribute name.
    * @param compressor Compressor to use for attribute
    * @return A new Attribute object.
+   *
+   * @note This function is deprecated and will be removed in a future version.
+   *       The filter API should be used instead.
+   */
+  template <typename T>
+  TILEDB_DEPRECATED static Attribute create(
+      const Context& ctx,
+      const std::string& name,
+      const Compressor& compressor) {
+    FilterList filter_list(ctx);
+    Filter filter(ctx, Compressor::to_filter(compressor.compressor()));
+    int32_t level = compressor.level();
+    filter.set_option(TILEDB_COMPRESSION_LEVEL, &level);
+    filter_list.add_filter(filter);
+
+    auto a = create<T>(ctx, name);
+    a.set_filter_list(filter_list);
+    return a;
+  }
+
+  /**
+   * Factory function for creating a new attribute with datatype T and
+   * a FilterList.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * tiledb::Context ctx;
+   * tiledb::FilterList filter_list(ctx);
+   * filter_list.add_filter({ctx, TILEDB_FILTER_BYTESHUFFLE})
+   *     .add_filter({ctx, TILEDB_FILTER_BZIP2});
+   * auto a1 = tiledb::Attribute::create<int>(ctx, "a1", filter_list);
+   * @endcode
+   *
+   * @tparam T Datatype of the attribute. Can either be arithmetic type,
+   *         C-style array, `std::string`, `std::vector`, or any trivially
+   *         copyable classes (defined by `std::is_trivially_copyable`).
+   * @param ctx The TileDB context.
+   * @param name The attribute name.
+   * @param filter_list FilterList to use for attribute
+   * @return A new Attribute object.
    */
   template <typename T>
   static Attribute create(
       const Context& ctx,
       const std::string& name,
-      const Compressor& compressor) {
+      const FilterList& filter_list) {
     auto a = create<T>(ctx, name);
-    a.set_compressor(compressor);
+    a.set_filter_list(filter_list);
     return a;
   }
 

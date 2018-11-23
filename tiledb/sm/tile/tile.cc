@@ -45,10 +45,10 @@ namespace sm {
 Tile::Tile() {
   buffer_ = nullptr;
   cell_size_ = 0;
-  compressor_ = Compressor::NO_COMPRESSION;
-  compression_level_ = -1;
   dim_num_ = 0;
+  filtered_ = false;
   owns_buff_ = true;
+  pre_filtered_size_ = 0;
   type_ = Datatype::INT32;
 }
 
@@ -56,37 +56,65 @@ Tile::Tile(unsigned int dim_num)
     : dim_num_(dim_num) {
   buffer_ = nullptr;
   cell_size_ = 0;
-  compressor_ = Compressor::NO_COMPRESSION;
-  compression_level_ = -1;
+  filtered_ = false;
   owns_buff_ = true;
+  pre_filtered_size_ = 0;
   type_ = Datatype::INT32;
 }
 
 Tile::Tile(
     Datatype type,
-    Compressor compressor,
-    int compression_level,
     uint64_t cell_size,
     unsigned int dim_num,
     Buffer* buff,
     bool owns_buff)
     : buffer_(buff)
     , cell_size_(cell_size)
-    , compressor_(compressor)
-    , compression_level_(compression_level)
     , dim_num_(dim_num)
+    , filtered_(false)
     , owns_buff_(owns_buff)
+    , pre_filtered_size_(0)
     , type_(type) {
 }
 
 Tile::Tile(const Tile& tile) {
-  owns_buff_ = false;
-  *this = tile;
+  // Make a deep-copy clone
+  auto clone = tile.clone(true);
+  // Swap with the clone
+  swap(clone);
+}
+
+Tile::Tile(Tile&& tile) {
+  // Swap with the argument
+  swap(tile);
 }
 
 Tile::~Tile() {
   if (owns_buff_)
     delete buffer_;
+}
+
+Tile& Tile::operator=(const Tile& tile) {
+  // Free existing buffer if owned.
+  if (owns_buff_) {
+    delete buffer_;
+    buffer_ = nullptr;
+    owns_buff_ = false;
+  }
+
+  // Make a deep-copy clone
+  auto clone = tile.clone(true);
+  // Swap with the clone
+  swap(clone);
+
+  return *this;
+}
+
+Tile& Tile::operator=(Tile&& tile) {
+  // Swap with the argument
+  swap(tile);
+
+  return *this;
 }
 
 /* ****************************** */
@@ -98,14 +126,14 @@ uint64_t Tile::cell_num() const {
 }
 
 Status Tile::init(
+    uint32_t format_version,
     Datatype type,
-    Compressor compressor,
     uint64_t cell_size,
     unsigned int dim_num) {
   cell_size_ = cell_size;
-  compressor_ = compressor;
   dim_num_ = dim_num;
   type_ = type;
+  format_version_ = format_version;
 
   buffer_ = new Buffer();
   if (buffer_ == nullptr)
@@ -116,17 +144,15 @@ Status Tile::init(
 }
 
 Status Tile::init(
+    uint32_t format_version,
     Datatype type,
-    Compressor compressor,
-    int compression_level,
     uint64_t tile_size,
     uint64_t cell_size,
     unsigned int dim_num) {
   cell_size_ = cell_size;
-  compressor_ = compressor;
-  compression_level_ = compression_level;
   dim_num_ = dim_num;
   type_ = type;
+  format_version_ = format_version;
 
   buffer_ = new Buffer();
   if (buffer_ == nullptr)
@@ -145,16 +171,35 @@ Buffer* Tile::buffer() const {
   return buffer_;
 }
 
+Tile Tile::clone(bool deep_copy) const {
+  Tile clone;
+  clone.cell_size_ = cell_size_;
+  clone.dim_num_ = dim_num_;
+  clone.filtered_ = filtered_;
+  clone.format_version_ = format_version_;
+  clone.pre_filtered_size_ = pre_filtered_size_;
+  clone.type_ = type_;
+
+  if (deep_copy) {
+    clone.owns_buff_ = owns_buff_;
+    if (owns_buff_ && buffer_ != nullptr) {
+      clone.buffer_ = new Buffer();
+      // Calls Buffer copy-assign, which calls memcpy.
+      *clone.buffer_ = *buffer_;
+    } else {
+      // this->buffer_ is either nullptr, or not owned. Just copy the pointer.
+      clone.buffer_ = buffer_;
+    }
+  } else {
+    clone.owns_buff_ = false;
+    clone.buffer_ = buffer_;
+  }
+
+  return clone;
+}
+
 uint64_t Tile::cell_size() const {
   return cell_size_;
-}
-
-Compressor Tile::compressor() const {
-  return compressor_;
-}
-
-int Tile::compression_level() const {
-  return compression_level_;
 }
 
 void* Tile::cur_data() const {
@@ -177,6 +222,14 @@ bool Tile::empty() const {
   return (buffer_ == nullptr) || (buffer_->size() == 0);
 }
 
+bool Tile::filtered() const {
+  return filtered_;
+}
+
+uint32_t Tile::format_version() const {
+  return format_version_;
+}
+
 bool Tile::full() const {
   return (buffer_->size() != 0) &&
          (buffer_->offset() == buffer_->alloced_size());
@@ -184,6 +237,10 @@ bool Tile::full() const {
 
 uint64_t Tile::offset() const {
   return buffer_->offset();
+}
+
+uint64_t Tile::pre_filtered_size() const {
+  return pre_filtered_size_;
 }
 
 Status Tile::realloc(uint64_t nbytes) {
@@ -209,8 +266,16 @@ void Tile::reset_size() {
   buffer_->reset_size();
 }
 
+void Tile::set_filtered(bool filtered) {
+  filtered_ = filtered;
+}
+
 void Tile::set_offset(uint64_t offset) {
   buffer_->set_offset(offset);
+}
+
+void Tile::set_pre_filtered_size(uint64_t pre_filtered_size) {
+  pre_filtered_size_ = pre_filtered_size;
 }
 
 void Tile::set_size(uint64_t size) {
@@ -306,37 +371,21 @@ void Tile::zip_coordinates() {
   std::free((void*)tile_tmp);
 }
 
-Tile& Tile::operator=(const Tile& tile) {
-  if (owns_buff_) {
-    delete buffer_;
-    buffer_ = nullptr;
-  }
-
-  cell_size_ = tile.cell_size_;
-  compressor_ = tile.compressor_;
-  compression_level_ = tile.compression_level_;
-  dim_num_ = tile.dim_num_;
-  owns_buff_ = tile.owns_buff_;
-  type_ = tile.type_;
-
-  if (!tile.owns_buff_) {
-    buffer_ = tile.buffer_;
-  } else {
-    if (tile.buffer_ == nullptr)
-      buffer_ = nullptr;
-    else {
-      if (buffer_ == nullptr)
-        buffer_ = new Buffer();
-      *buffer_ = *tile.buffer_;
-    }
-  }
-
-  return *this;
-}
-
 /* ****************************** */
 /*          PRIVATE METHODS       */
 /* ****************************** */
+
+void Tile::swap(Tile& tile) {
+  // Note swapping buffer pointers here.
+  std::swap(buffer_, tile.buffer_);
+  std::swap(cell_size_, tile.cell_size_);
+  std::swap(dim_num_, tile.dim_num_);
+  std::swap(filtered_, tile.filtered_);
+  std::swap(format_version_, tile.format_version_);
+  std::swap(owns_buff_, tile.owns_buff_);
+  std::swap(pre_filtered_size_, tile.pre_filtered_size_);
+  std::swap(type_, tile.type_);
+}
 
 }  // namespace sm
 }  // namespace tiledb

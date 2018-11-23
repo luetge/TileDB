@@ -70,8 +70,6 @@ class Tile {
    * Constructor.
    *
    * @param type The type of the data to be stored.
-   * @param compression The compression type.
-   * @param compression_level The compression level.
    * @param cell_size The cell size.
    * @param dim_num The number of dimensions in case the tile stores
    *      coordinates.
@@ -83,18 +81,31 @@ class Tile {
    */
   Tile(
       Datatype type,
-      Compressor compression,
-      int compression_level,
       uint64_t cell_size,
       unsigned int dim_num,
       Buffer* buff,
       bool owns_buff);
 
-  /** Copy constructor. */
+  /**
+   * Copy constructor. This performs a deep copy (including potential memcpy of
+   * underlying buffers).
+   */
   Tile(const Tile& tile);
+
+  /** Move constructor. */
+  Tile(Tile&& tile);
 
   /** Destructor. */
   ~Tile();
+
+  /**
+   * Copy-assign operator. This performs a deep copy (including potential memcpy
+   * of underlying buffers).
+   */
+  Tile& operator=(const Tile& tile);
+
+  /** Move-assign operator. */
+  Tile& operator=(Tile&& tile);
 
   /* ********************************* */
   /*                API                */
@@ -107,15 +118,15 @@ class Tile {
    * Tile initializer.
    *
    * @param type The type of the data to be stored.
-   * @param compression The compression type.
    * @param cell_size The cell size.
    * @param dim_num The number of dimensions in case the tile stores
    *      coordinates.
+   * @param format_version The format version of the data in this tile.
    * @return Status
    */
   Status init(
+      uint32_t format_version,
       Datatype type,
-      Compressor compression,
       uint64_t cell_size,
       unsigned int dim_num);
 
@@ -123,19 +134,17 @@ class Tile {
    * Tile initializer.
    *
    * @param type The type of the data to be stored.
-   * @param compression The compression type.
-   * @param compression_level The compression level.
    * @param tile_size The tile size. The internal buffer will be allocated
    *     that much space upon construction.
    * @param cell_size The cell size.
    * @param dim_num The number of dimensions in case the tile stores
    *      coordinates.
+   * @param format_version The format version of the data in this tile.
    * @return Status
    */
   Status init(
+      uint32_t format_version,
       Datatype type,
-      Compressor compression,
-      int compression_level,
       uint64_t tile_size,
       uint64_t cell_size,
       unsigned int dim_num);
@@ -149,11 +158,15 @@ class Tile {
   /** Returns the cell size. */
   uint64_t cell_size() const;
 
-  /** Returns the tile compressor. */
-  Compressor compressor() const;
-
-  /** Returns the tile compression level. */
-  int compression_level() const;
+  /**
+   * Returns a shallow or deep copy of this Tile.
+   *
+   * @param deep_copy If true, a deep copy is performed, including potentially
+   *    memcpying the underlying Buffer. If false, a shallow copy is performed,
+   *    which sets the clone's Buffer equal to Tile's buffer pointer.
+   * @return New Tile
+   */
+  Tile clone(bool deep_copy) const;
 
   /** Returns the buffer data pointer at the current offset. */
   void* cur_data() const;
@@ -173,11 +186,34 @@ class Tile {
   /** Checks if the tile is empty. */
   bool empty() const;
 
+  /**
+   * Returns the current filtered state of the tile data in the buffer.
+   *
+   * On writes, this returns true once the tile buffer is ready to be written
+   * (compressed, etc).
+   *
+   * On reads, this returns true once the tile buffer is ready to be copied to
+   * user buffers (decompressed, etc).
+   */
+  bool filtered() const;
+
+  /** Gets the format version number of the data in this Tile. */
+  uint32_t format_version() const;
+
   /** Checks if the tile is full. */
   bool full() const;
 
   /** The current offset in the tile. */
   uint64_t offset() const;
+
+  /**
+   * Returns the pre-filtered size of the tile data in the buffer.
+   *
+   * On writes, the pre-filtered size is the uncompressed size.
+   *
+   * On reads, the pre-filtered size is the persisted (compressed) size.
+   */
+  uint64_t pre_filtered_size() const;
 
   /** Reallocates nbytes for the internal tile buffer. */
   Status realloc(uint64_t nbytes);
@@ -194,8 +230,14 @@ class Tile {
   /** Resets the tile size. */
   void reset_size();
 
+  /** Set the filtered state of the tile. */
+  void set_filtered(bool filtered);
+
   /** Sets the tile offset. */
   void set_offset(uint64_t offset);
+
+  /** Sets the pre-filtered size value to the given value. */
+  void set_pre_filtered_size(uint64_t pre_filtered_size);
 
   /** Sets the internal buffer size. */
   void set_size(uint64_t size);
@@ -253,9 +295,6 @@ class Tile {
    */
   void zip_coordinates();
 
-  /** Copy operator. */
-  Tile& operator=(const Tile& tile);
-
  private:
   /* ********************************* */
   /*         PRIVATE ATTRIBUTES        */
@@ -267,17 +306,17 @@ class Tile {
   /** The cell size. */
   uint64_t cell_size_;
 
-  /** The compression type. */
-  Compressor compressor_;
-
-  /** The compression level. */
-  int compression_level_;
-
   /**
    * The number of dimensions, in case the tile stores coordinates. It is 0
    * in case the tile stores attributes.
    */
   unsigned int dim_num_;
+
+  /** The current state of the in-memory tile data with respect to filtering. */
+  bool filtered_;
+
+  /** The format version of the data in this tile. */
+  uint32_t format_version_;
 
   /**
    * If *true* the tile object will delete *buff* upon
@@ -285,12 +324,18 @@ class Tile {
    */
   bool owns_buff_;
 
+  /** The size in bytes of the tile data before it has been filtered. */
+  uint64_t pre_filtered_size_;
+
   /** The tile data type. */
   Datatype type_;
 
   /* ********************************* */
   /*          PRIVATE METHODS          */
   /* ********************************* */
+
+  /** Swaps the contents (all field values) of this tile with the given tile. */
+  void swap(Tile& tile);
 };
 
 }  // namespace sm

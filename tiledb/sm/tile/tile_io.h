@@ -33,6 +33,7 @@
 #ifndef TILEDB_TILE_IO_H
 #define TILEDB_TILE_IO_H
 
+#include "tiledb/sm/filter/filter_pipeline.h"
 #include "tiledb/sm/misc/uri.h"
 #include "tiledb/sm/storage_manager/storage_manager.h"
 #include "tiledb/sm/tile/tile.h"
@@ -56,30 +57,35 @@ class TileIO {
    * the tile data itself.
    */
   struct GenericTileHeader {
-    /** Size, in bytes, of the serialized header. */
-    static const uint64_t SIZE =
-        3 * sizeof(uint64_t) + 2 * sizeof(char) + sizeof(int);
-    /** Compressed size of the tile. */
-    uint64_t compressed_size;
+    /** Size in bytes of the non-filters part of the serialized header. */
+    static const uint64_t BASE_SIZE =
+        3 * sizeof(uint64_t) + 2 * sizeof(char) + 2 * sizeof(uint32_t);
+    /** Format version number of the tile. */
+    uint32_t version_number;
+    /** Persisted (e.g. compressed) size of the tile. */
+    uint64_t persisted_size;
     /** Uncompressed size of the tile. */
     uint64_t tile_size;
     /** Datatype of the tile. */
-    char datatype;
+    uint8_t datatype;
     /** Cell size of the tile. */
     uint64_t cell_size;
-    /** Compressor of the tile. */
-    char compressor;
-    /** Compression level of the tile. */
-    int compression_level;
+    /** The type of the encryption used in filtering. */
+    uint8_t encryption_type;
+    /** Number of bytes in the serialized filter pipeline instance. */
+    uint32_t filter_pipeline_size;
+    /** Filter pipeline used to filter the tile. */
+    FilterPipeline filters;
 
     /** Constructor. */
     GenericTileHeader()
-        : compressed_size(0)
+        : version_number(constants::format_version)
+        , persisted_size(0)
         , tile_size(0)
-        , datatype((char)Datatype::ANY)
+        , datatype((uint8_t)Datatype::ANY)
         , cell_size(0)
-        , compressor((char)Compressor::NO_COMPRESSION)
-        , compression_level(-1) {
+        , encryption_type((uint8_t)EncryptionType::NO_ENCRYPTION)
+        , filter_pipeline_size(0) {
     }
   };
 
@@ -107,9 +113,6 @@ class TileIO {
    */
   TileIO(StorageManager* storage_manager, const URI& uri, uint64_t file_size);
 
-  /** Destructor. */
-  ~TileIO();
-
   /* ********************************* */
   /*                API                */
   /* ********************************* */
@@ -129,23 +132,6 @@ class TileIO {
       const StorageManager* sm, const URI& uri, bool* is_generic_tile);
 
   /**
-   * Reads into a tile from the file.
-   *
-   * @param tile The tile to read into.
-   * @param file_offset The offset in the file to read from.
-   * @param compressed_size The size of the compressed tile.
-   * @param tile_size The size of the decompressed tile.
-   * @param cache_hit Set to true if the tile was read from the cache.
-   * @return Status.
-   */
-  Status read(
-      Tile* tile,
-      uint64_t file_offset,
-      uint64_t compressed_size,
-      uint64_t tile_size,
-      bool* cache_hit);
-
-  /**
    * Reads a generic tile from the file. A generic tile is a tile residing
    * together with its metadata in one contiguous byte region of a file. This is
    * as opposed to a regular tile, where the metadata resides separately from
@@ -157,9 +143,11 @@ class TileIO {
    *
    * @param tile The tile that will hold the read data.
    * @param file_offset The offset in the file to read from.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status read_generic(Tile** tile, uint64_t file_offset);
+  Status read_generic(
+      Tile** tile, uint64_t file_offset, const EncryptionKey& encryption_key);
 
   /**
    * Reads the generic tile header from the file.
@@ -167,6 +155,8 @@ class TileIO {
    * @param sm The StorageManager instance to use for reading.
    * @param uri The URI of the generic tile.
    * @param file_offset The offset where the header read will begin.
+   * @param encryption_key If the array is encrypted, the private encryption
+   *    key. For unencrypted arrays, pass `nullptr`.
    * @param header The header to be retrieved.
    * @return Status
    */
@@ -177,47 +167,29 @@ class TileIO {
       GenericTileHeader* header);
 
   /**
-   * Writes (appends) a tile into the file.
-   *
-   * @param tile The tile to be written.
-   * @param bytes_written The actual number of bytes written. This may be
-   *     different from the tile size, since the write function may
-   *     invoke a filter such as compression prior to writing to the file.
-   * @return Status.
-   */
-  Status write(Tile* tile, uint64_t* bytes_written);
-
-  /**
    * Writes a tile generically to the file. This means that a header will be
    * prepended to the file before writing the tile contents. The reason is
    * that there will be no tile metadata retrieved from another source,
    * other thant the file itself.
    *
    * @param tile The tile to be written.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status write_generic(Tile* tile);
+  Status write_generic(Tile* tile, const EncryptionKey& encryption_key);
 
   /**
    * Writes the generic tile header to the file.
    *
-   * @param tile The tile whose header will be written.
-   * @param compressed_size The size that the (potentially) compressed tile
-   *     will occupy in the file.
+   * @param header The header to write
    * @return Status
    */
-  Status write_generic_tile_header(Tile* tile, uint64_t compressed_size);
+  Status write_generic_tile_header(GenericTileHeader* header);
 
  private:
   /* ********************************* */
   /*         PRIVATE ATTRIBUTES        */
   /* ********************************* */
-
-  /**
-   * An internal buffer used to facilitate compression/decompression (or
-   * other future filters).
-   */
-  Buffer* buffer_;
 
   /** The size of the file pointed by `uri_`. */
   uint64_t file_size_;
@@ -228,117 +200,30 @@ class TileIO {
   /** The file URI. */
   URI uri_;
 
-  /* ********************************* */
-  /*      PRIVATE TYPE DEFINITIONS     */
-  /* ********************************* */
-
   /**
-   * Encapsulated information about tile chunks for decompression.
-   */
-  struct DecompressionChunkInfo {
-    /** Number of chunks to decompress. */
-    uint64_t chunk_num_;
-    /** Pointer to start of compressed chunk data. */
-    const char* compressed_chunks_;
-    /** Pointer to start of destination buffer for decompressed chunks. */
-    char* decompressed_chunks_;
-    /** Vector of (offset, len) pairs for the compressed chunks. */
-    std::vector<std::pair<uint64_t, uint64_t>> compressed_chunk_info_;
-    /**
-     * Vector of (offset, len) pairs for the decompressed chunk destinations.
-     */
-    std::vector<std::pair<uint64_t, uint64_t>> decompressed_chunk_info_;
-    /** Total number of bytes that will be decompressed. */
-    uint64_t total_decompressed_bytes_;
-
-    /** Constructor. */
-    DecompressionChunkInfo()
-        : chunk_num_(0)
-        , compressed_chunks_(nullptr)
-        , decompressed_chunks_(nullptr)
-        , total_decompressed_bytes_(0) {
-    }
-  };
-
-  /* ********************************* */
-  /*          PRIVATE METHODS          */
-  /* ********************************* */
-
-  /**
-   * Checks if the given number of bytes can be compressed in a single block.
+   * Configures the header's encryption filter with the given key.
    *
-   * @param nbytes Number of bytes including overhead to check.
-   * @return True if the given number of bytes can be compressed
-   */
-  bool can_compress_nbytes(uint64_t nbytes) const;
-
-  /**
-   * Compresses a tile. The compressed data are written in buffer_.
-   * Note that a coordinates tile must be split into one tile per
-   * dimension. In that case *compress_one_tile* will be invoked
-   * for each dimension sub-tile.
-   *
-   * @param tile The tile to be compressed.
+   * @param header Header instance to modify.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status compress_tile(Tile* tile);
+  Status configure_encryption_filter(
+      GenericTileHeader* header, const EncryptionKey& encryption_key) const;
 
   /**
-   * Compresses a single tile. The compressed data are written in buffer_.
+   * Initializes a generic tile header struct.
    *
-   * @param tile The tile to be compressed.
+   * This does not set the persisted size or filter pipeline size fields.
+   *
+   * @param tile The tile to initialize a header for
+   * @param header The header to initialize
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status compress_one_tile(Tile* tile);
-
-  /**
-   * Computes necessary info for chunking a tile upon compression.
-   *
-   * @param tile The tile whose chunking info is being computed.
-   * @param chunk_num The computed number of chunks.
-   * @param chunk_size The computed chunk size (a multiple of the cell size).
-   * @param chunk_overhead The compression overhead for `chunk_size` bytes.
-   * @param total_overhead The total compression overhead.
-   * @return Status
-   */
-  Status compute_chunking_info(
+  Status init_generic_tile_header(
       Tile* tile,
-      uint64_t* chunk_num,
-      uint64_t* chunk_size,
-      uint64_t* chunk_overhead,
-      uint64_t* total_overhead);
-
-  /**
-   * Computes necessary info for decompressing chunks of a tile.
-   *
-   * @param tile The tile whose chunking info is being computed.
-   * @param info The info that will be computed.
-   * @return Status
-   */
-  Status compute_decompression_chunk_info(
-      Tile* tile, DecompressionChunkInfo* info);
-
-  /**
-   * Decompresses buffer_ into a tile.
-   * Note that a coordinates tile was split into one tile per
-   * dimension. In that case *decompress_one_tile* will be invoked
-   * for each dimension sub-tile.
-   *
-   * @param tile The tile where the decompressed data will be stored.
-   * @return Status
-   */
-  Status decompress_tile(Tile* tile);
-
-  /**
-   * Decompresses buffer_ into a tile.
-   *
-   * @param tile The tile where the decompressed data will be stored.
-   * @return Status
-   */
-  Status decompress_one_tile(Tile* tile);
-
-  /** Computes the compression overhead on *nbytes* of the input tile. */
-  uint64_t overhead(Tile* tile, uint64_t nbytes) const;
+      GenericTileHeader* header,
+      const EncryptionKey& encryption_key) const;
 };
 
 }  // namespace sm

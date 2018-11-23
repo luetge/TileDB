@@ -186,6 +186,21 @@ std::string Status::code_to_string() const {
     case StatusCode::PreallocatedBuffer:
       type = "[TileDB::PreallocatedBuffer] Error";
       break;
+    case StatusCode::Filter:
+      type = "[TileDB::Filter] Error";
+      break;
+    case StatusCode::Encryption:
+      type = "[TileDB::Encryption] Error";
+      break;
+    case StatusCode::Array:
+      type = "[TileDB::Array] Error";
+      break;
+    case StatusCode::VFSFileHandleError:
+      type = "[TileDB::VFSFileHandle] Error";
+      break;
+    case StatusCode::ContextError:
+      type = "[TileDB::Context] Error";
+      break;
     default:
       type = "[TileDB::?] Error:";
   }

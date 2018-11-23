@@ -56,6 +56,22 @@ class URI {
    * @param path String that gets converted into an absolute path and stored
    *     as a URI.
    */
+  explicit URI(const char* path);
+
+  /**
+   * Constructor.
+   *
+   * @param path String that gets converted into an absolute path and stored
+   *     as a URI.
+   */
+  explicit URI(char* path);
+
+  /**
+   * Constructor.
+   *
+   * @param path String that gets converted into an absolute path and stored
+   *     as a URI.
+   */
   explicit URI(const std::string& path);
 
   /** Destructor. */
@@ -158,6 +174,12 @@ class URI {
 
   /** Returns the URI string. */
   std::string to_string() const;
+
+  /** For comparing URIs alphanumerically. */
+  bool operator<(const URI& uri) const;
+
+  /** For comparing URIs alphanumerically. */
+  bool operator>(const URI& uri) const;
 
  private:
   /* ********************************* */

@@ -45,6 +45,13 @@
 #include <sys/time.h>
 #endif
 
+/* ****************************** */
+/*             MACROS             */
+/* ****************************** */
+
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
+#define MAX(a, b) ((a) > (b) ? (a) : (b))
+
 namespace tiledb {
 namespace sm {
 
@@ -144,127 +151,6 @@ bool is_uint(const std::string& str) {
   return true;
 }
 
-}  // namespace parse
-
-/* ****************************** */
-/*           FUNCTIONS            */
-/* ****************************** */
-
-template <class T>
-inline bool coords_in_rect(
-    const T* coords, const T* rect, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i) {
-    if (coords[i] < rect[2 * i] || coords[i] > rect[2 * i + 1])
-      return false;
-  }
-
-  return true;
-}
-
-template <class T>
-uint64_t cell_num_in_subarray(const T* subarray, unsigned int dim_num) {
-  uint64_t cell_num = 1;
-
-  for (unsigned int i = 0; i < dim_num; ++i)
-    cell_num *= subarray[2 * i + 1] - subarray[2 * i] + 1;
-
-  return cell_num;
-}
-
-template <class T>
-int cmp_col_order(const T* coords_a, const T* coords_b, unsigned int dim_num) {
-  for (unsigned int i = dim_num - 1;; --i) {
-    // a precedes b
-    if (coords_a[i] < coords_b[i])
-      return -1;
-    // b precedes a
-    if (coords_a[i] > coords_b[i])
-      return 1;
-
-    if (i == 0)
-      break;
-  }
-
-  // a and b are equal
-  return 0;
-}
-
-template <class T>
-int cmp_col_order(
-    uint64_t id_a,
-    const T* coords_a,
-    uint64_t id_b,
-    const T* coords_b,
-    unsigned int dim_num) {
-  // a precedes b
-  if (id_a < id_b)
-    return -1;
-
-  // b precedes a
-  if (id_a > id_b)
-    return 1;
-
-  // ids are equal, check the coordinates
-  for (unsigned int i = dim_num - 1;; --i) {
-    // a precedes b
-    if (coords_a[i] < coords_b[i])
-      return -1;
-    // b precedes a
-    if (coords_a[i] > coords_b[i])
-      return 1;
-
-    if (i == 0)
-      break;
-  }
-
-  // a and b are equal
-  return 0;
-}
-
-template <class T>
-int cmp_row_order(const T* coords_a, const T* coords_b, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i) {
-    // a precedes b
-    if (coords_a[i] < coords_b[i])
-      return -1;
-    // b precedes a
-    if (coords_a[i] > coords_b[i])
-      return 1;
-  }
-
-  // a and b are equal
-  return 0;
-}
-
-template <class T>
-int cmp_row_order(
-    uint64_t id_a,
-    const T* coords_a,
-    uint64_t id_b,
-    const T* coords_b,
-    unsigned int dim_num) {
-  // a precedes b
-  if (id_a < id_b)
-    return -1;
-
-  // b precedes a
-  if (id_a > id_b)
-    return 1;
-
-  // ids are equal, check the coordinates
-  for (unsigned int i = 0; i < dim_num; ++i) {
-    // a precedes b
-    if (coords_a[i] < coords_b[i])
-      return -1;
-    // b precedes a
-    if (coords_a[i] > coords_b[i])
-      return 1;
-  }
-
-  // a and b are equal
-  return 0;
-}
-
 std::string domain_str(const void* domain, Datatype type) {
   std::stringstream ss;
 
@@ -338,175 +224,6 @@ std::string domain_str(const void* domain, Datatype type) {
 
   assert(false);
   return "";
-}
-
-Status expand_buffer(void*& buffer, uint64_t* buffer_allocated_size) {
-  *buffer_allocated_size *= 2;
-  auto new_buffer = std::realloc(buffer, *buffer_allocated_size);
-  if (new_buffer == nullptr)
-    return LOG_STATUS(Status::MemError("Cannot reallocate buffer"));
-  buffer = new_buffer;
-  return Status::Ok();
-}
-
-template <class T>
-void expand_mbr(T* mbr, const T* coords, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i) {
-    // Update lower bound on dimension i
-    if (mbr[2 * i] > coords[i])
-      mbr[2 * i] = coords[i];
-
-    // Update upper bound on dimension i
-    if (mbr[2 * i + 1] < coords[i])
-      mbr[2 * i + 1] = coords[i];
-  }
-}
-
-const void* fill_value(Datatype type) {
-  switch (type) {
-    case Datatype::INT8:
-      return &constants::empty_int8;
-    case Datatype::UINT8:
-      return &constants::empty_uint8;
-    case Datatype::INT16:
-      return &constants::empty_int16;
-    case Datatype::UINT16:
-      return &constants::empty_uint16;
-    case Datatype::INT32:
-      return &constants::empty_int32;
-    case Datatype::UINT32:
-      return &constants::empty_uint32;
-    case Datatype::INT64:
-      return &constants::empty_int64;
-    case Datatype::UINT64:
-      return &constants::empty_uint64;
-    case Datatype::FLOAT32:
-      return &constants::empty_float32;
-    case Datatype::FLOAT64:
-      return &constants::empty_float64;
-    case Datatype::CHAR:
-      return &constants::empty_char;
-    case Datatype::ANY:
-      return &constants::empty_any;
-    case Datatype::STRING_ASCII:
-      return &constants::empty_ascii;
-    case Datatype::STRING_UTF8:
-      return &constants::empty_utf8;
-    case Datatype::STRING_UTF16:
-      return &constants::empty_utf16;
-    case Datatype::STRING_UTF32:
-      return &constants::empty_utf32;
-    case Datatype::STRING_UCS2:
-      return &constants::empty_ucs2;
-    case Datatype::STRING_UCS4:
-      return &constants::empty_ucs4;
-  }
-
-  return nullptr;
-}
-
-template <class T>
-bool has_duplicates(const std::vector<T>& v) {
-  std::set<T> s(v.begin(), v.end());
-
-  return s.size() != v.size();
-}
-
-template <class T>
-bool inside_subarray(const T* coords, const T* subarray, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i)
-    if (coords[i] < subarray[2 * i] || coords[i] > subarray[2 * i + 1])
-      return false;
-
-  return true;
-}
-
-template <class T>
-bool intersect(const std::vector<T>& v1, const std::vector<T>& v2) {
-  std::set<T> s1(v1.begin(), v1.end());
-  std::set<T> s2(v2.begin(), v2.end());
-  std::vector<T> intersect;
-  std::set_intersection(
-      s1.begin(),
-      s1.end(),
-      s2.begin(),
-      s2.end(),
-      std::back_inserter(intersect));
-
-  return !intersect.empty();
-}
-
-template <class T>
-bool rect_in_rect(const T* a, const T* b, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i)
-    if (a[2 * i] < b[2 * i] || a[2 * i + 1] > b[2 * i + 1])
-      return false;
-
-  return true;
-}
-
-bool is_positive_integer(const char* s) {
-  int i = 0;
-
-  if (s[0] == '-')  // negative
-    return false;
-
-  if (s[0] == '0' && s[1] == '\0')  // equal to 0
-    return false;
-
-  if (s[0] == '+')
-    i = 1;  // Skip the first character if it is the + sign
-
-  for (; s[i] != '\0'; ++i) {
-    if (isdigit(s[i]) == 0)
-      return false;
-  }
-
-  return true;
-}
-
-template <class T>
-bool is_unary_subarray(const T* subarray, unsigned int dim_num) {
-  for (unsigned int i = 0; i < dim_num; ++i) {
-    if (subarray[2 * i] != subarray[2 * i + 1])
-      return false;
-  }
-
-  return true;
-}
-
-template <class T>
-bool overlap(const T* a, const T* b, unsigned dim_num) {
-  for (unsigned i = 0; i < dim_num; ++i) {
-    if (a[2 * i] > b[2 * i + 1] || a[2 * i + 1] < b[2 * i])
-      return false;
-  }
-
-  return true;
-}
-
-template <class T>
-double coverage(const T* a, const T* b, unsigned dim_num) {
-  double c = 1.0;
-  for (unsigned i = 0; i < dim_num; ++i)
-    if (std::is_integral<T>::value)
-      c *= double(a[2 * i + 1] - a[2 * i] + 1) / (b[2 * i + 1] - b[2 * i] + 1);
-    else
-      c *= double(a[2 * i + 1] - a[2 * i]) / (b[2 * i + 1] - b[2 * i]);
-  return c;
-}
-
-bool starts_with(const std::string& value, const std::string& prefix) {
-  if (prefix.size() > value.size())
-    return false;
-  return std::equal(prefix.begin(), prefix.end(), value.begin());
-}
-
-bool ends_with(const std::string& value, const std::string& suffix) {
-  if (suffix.size() > value.size())
-    return false;
-  return value.compare(value.size() - suffix.size(), suffix.size(), suffix) ==
-         0;
 }
 
 std::string tile_extent_str(const void* tile_extent, Datatype type) {
@@ -584,7 +301,217 @@ std::string tile_extent_str(const void* tile_extent, Datatype type) {
   return "";
 }
 
-uint64_t timestamp_ms() {
+bool starts_with(const std::string& value, const std::string& prefix) {
+  if (prefix.size() > value.size())
+    return false;
+  return std::equal(prefix.begin(), prefix.end(), value.begin());
+}
+
+bool ends_with(const std::string& value, const std::string& suffix) {
+  if (suffix.size() > value.size())
+    return false;
+  return value.compare(value.size() - suffix.size(), suffix.size(), suffix) ==
+         0;
+}
+
+}  // namespace parse
+
+/* ****************************** */
+/*         TYPE FUNCTIONS         */
+/* ****************************** */
+
+namespace datatype {
+
+template <>
+Status check_template_type_to_datatype<int8_t>(Datatype datatype) {
+  if (datatype == Datatype::INT8)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type int8_t but datatype is not Datatype::INT8");
+}
+template <>
+Status check_template_type_to_datatype<uint8_t>(Datatype datatype) {
+  if (datatype == Datatype::UINT8)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_ASCII)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_UTF8)
+    return Status::Ok();
+
+  return Status::Error(
+      "Template of type uint8_t but datatype is not Datatype::UINT8 nor "
+      "Datatype::STRING_ASCII nor atatype::STRING_UTF8");
+}
+template <>
+Status check_template_type_to_datatype<int16_t>(Datatype datatype) {
+  if (datatype == Datatype::INT16)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type int16_t but datatype is not Datatype::INT16");
+}
+template <>
+Status check_template_type_to_datatype<uint16_t>(Datatype datatype) {
+  if (datatype == Datatype::UINT16)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_UTF16)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_UCS2)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type uint16_t but datatype is not Datatype::UINT16 nor "
+      "Datatype::STRING_UTF16 nor Datatype::STRING_UCS2");
+}
+template <>
+Status check_template_type_to_datatype<int32_t>(Datatype datatype) {
+  if (datatype == Datatype::INT32)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type int32_t but datatype is not Datatype::INT32");
+}
+template <>
+Status check_template_type_to_datatype<uint32_t>(Datatype datatype) {
+  if (datatype == Datatype::UINT32)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_UTF32)
+    return Status::Ok();
+  else if (datatype == Datatype::STRING_UCS4)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type uint32_t but datatype is not Datatype::UINT32 nor "
+      "Datatype::STRING_UTF32 nor Datatype::STRING_UCS4");
+}
+template <>
+Status check_template_type_to_datatype<int64_t>(Datatype datatype) {
+  if (datatype == Datatype::INT64)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type int64_t but datatype is not Datatype::INT64");
+}
+template <>
+Status check_template_type_to_datatype<uint64_t>(Datatype datatype) {
+  if (datatype == Datatype::UINT64)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type uint64_t but datatype is not Datatype::UINT64");
+}
+template <>
+Status check_template_type_to_datatype<float>(Datatype datatype) {
+  if (datatype == Datatype::FLOAT32)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type float but datatype is not Datatype::FLOAT32");
+}
+template <>
+Status check_template_type_to_datatype<double>(Datatype datatype) {
+  if (datatype == Datatype::FLOAT64)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type double but datatype is not Datatype::FLOAT64");
+}
+template <>
+Status check_template_type_to_datatype<char>(Datatype datatype) {
+  if (datatype == Datatype::CHAR)
+    return Status::Ok();
+  return Status::Error(
+      "Template of type char but datatype is not Datatype::CHAR");
+}
+
+}  // namespace datatype
+
+/* ********************************* */
+/*        GEOMETRY FUNCTIONS         */
+/* ********************************* */
+
+namespace geometry {
+
+template <class T>
+inline bool coords_in_rect(
+    const T* coords, const T* rect, unsigned int dim_num) {
+  for (unsigned int i = 0; i < dim_num; ++i) {
+    if (coords[i] < rect[2 * i] || coords[i] > rect[2 * i + 1])
+      return false;
+  }
+
+  return true;
+}
+
+template <class T>
+void expand_mbr(T* mbr, const T* coords, unsigned int dim_num) {
+  for (unsigned int i = 0; i < dim_num; ++i) {
+    // Update lower bound on dimension i
+    if (mbr[2 * i] > coords[i])
+      mbr[2 * i] = coords[i];
+
+    // Update upper bound on dimension i
+    if (mbr[2 * i + 1] < coords[i])
+      mbr[2 * i + 1] = coords[i];
+  }
+}
+
+template <class T>
+bool overlap(const T* a, const T* b, unsigned dim_num) {
+  for (unsigned i = 0; i < dim_num; ++i) {
+    if (a[2 * i] > b[2 * i + 1] || a[2 * i + 1] < b[2 * i])
+      return false;
+  }
+
+  return true;
+}
+
+template <class T>
+bool overlap(const T* a, const T* b, unsigned dim_num, bool* a_contains_b) {
+  for (unsigned i = 0; i < dim_num; ++i) {
+    if (a[2 * i] > b[2 * i + 1] || a[2 * i + 1] < b[2 * i])
+      return false;
+  }
+
+  *a_contains_b = true;
+  for (unsigned i = 0; i < dim_num; ++i) {
+    if (a[2 * i] > b[2 * i] || a[2 * i + 1] < b[2 * i + 1]) {
+      *a_contains_b = false;
+      break;
+    }
+  }
+
+  return true;
+}
+
+template <class T>
+void overlap(const T* a, const T* b, unsigned dim_num, T* o, bool* overlap) {
+  // Get overlap range
+  *overlap = true;
+  for (unsigned int i = 0; i < dim_num; ++i) {
+    o[2 * i] = MAX(a[2 * i], b[2 * i]);
+    o[2 * i + 1] = MIN(a[2 * i + 1], b[2 * i + 1]);
+    if (o[2 * i] > b[2 * i + 1] || o[2 * i + 1] < b[2 * i]) {
+      *overlap = false;
+      break;
+    }
+  }
+}
+
+template <class T>
+double coverage(const T* a, const T* b, unsigned dim_num) {
+  double c = 1.0;
+  auto add = int(std::is_integral<T>::value);
+
+  for (unsigned i = 0; i < dim_num; ++i) {
+    auto a_range = double(a[2 * i + 1]) - a[2 * i] + add;
+    auto b_range = double(b[2 * i + 1]) - b[2 * i] + add;
+    c *= a_range / b_range;
+  }
+  return c;
+}
+
+}  // namespace geometry
+
+/* ********************************* */
+/*          TIME FUNCTIONS           */
+/* ********************************* */
+
+namespace time {
+
+uint64_t timestamp_now_ms() {
 #ifdef _WIN32
   struct _timeb tb;
   memset(&tb, 0, sizeof(struct _timeb));
@@ -598,6 +525,14 @@ uint64_t timestamp_ms() {
 #endif
 }
 
+}  // namespace time
+
+/* ********************************* */
+/*          MATH FUNCTIONS           */
+/* ********************************* */
+
+namespace math {
+
 uint64_t ceil(uint64_t x, uint64_t y) {
   if (y == 0)
     return 0;
@@ -605,27 +540,11 @@ uint64_t ceil(uint64_t x, uint64_t y) {
   return x / y + (x % y != 0);
 }
 
+}  // namespace math
+
 // Explicit template instantiations
-template uint64_t cell_num_in_subarray<int>(
-    const int* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<int64_t>(
-    const int64_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<float>(
-    const float* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<double>(
-    const double* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<int8_t>(
-    const int8_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<uint8_t>(
-    const uint8_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<int16_t>(
-    const int16_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<uint16_t>(
-    const uint16_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<uint32_t>(
-    const uint32_t* subarray, unsigned int dim_num);
-template uint64_t cell_num_in_subarray<uint64_t>(
-    const uint64_t* subarray, unsigned int dim_num);
+
+namespace geometry {
 
 template bool coords_in_rect<int>(
     const int* cell, const int* subarray, unsigned int dim_num);
@@ -648,170 +567,6 @@ template bool coords_in_rect<uint32_t>(
 template bool coords_in_rect<uint64_t>(
     const uint64_t* cell, const uint64_t* subarray, unsigned int dim_num);
 
-template int cmp_col_order<int>(
-    const int* coords_a, const int* coords_b, unsigned int dim_num);
-template int cmp_col_order<int64_t>(
-    const int64_t* coords_a, const int64_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<float>(
-    const float* coords_a, const float* coords_b, unsigned int dim_num);
-template int cmp_col_order<double>(
-    const double* coords_a, const double* coords_b, unsigned int dim_num);
-template int cmp_col_order<int8_t>(
-    const int8_t* coords_a, const int8_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<uint8_t>(
-    const uint8_t* coords_a, const uint8_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<int16_t>(
-    const int16_t* coords_a, const int16_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<uint16_t>(
-    const uint16_t* coords_a, const uint16_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<uint32_t>(
-    const uint32_t* coords_a, const uint32_t* coords_b, unsigned int dim_num);
-template int cmp_col_order<uint64_t>(
-    const uint64_t* coords_a, const uint64_t* coords_b, unsigned int dim_num);
-
-template int cmp_col_order<int>(
-    uint64_t id_a,
-    const int* coords_a,
-    uint64_t id_b,
-    const int* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<int64_t>(
-    uint64_t id_a,
-    const int64_t* coords_a,
-    uint64_t id_b,
-    const int64_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<float>(
-    uint64_t id_a,
-    const float* coords_a,
-    uint64_t id_b,
-    const float* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<double>(
-    uint64_t id_a,
-    const double* coords_a,
-    uint64_t id_b,
-    const double* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<int8_t>(
-    uint64_t id_a,
-    const int8_t* coords_a,
-    uint64_t id_b,
-    const int8_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<uint8_t>(
-    uint64_t id_a,
-    const uint8_t* coords_a,
-    uint64_t id_b,
-    const uint8_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<int16_t>(
-    uint64_t id_a,
-    const int16_t* coords_a,
-    uint64_t id_b,
-    const int16_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<uint16_t>(
-    uint64_t id_a,
-    const uint16_t* coords_a,
-    uint64_t id_b,
-    const uint16_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<uint32_t>(
-    uint64_t id_a,
-    const uint32_t* coords_a,
-    uint64_t id_b,
-    const uint32_t* coords_b,
-    unsigned int dim_num);
-template int cmp_col_order<uint64_t>(
-    uint64_t id_a,
-    const uint64_t* coords_a,
-    uint64_t id_b,
-    const uint64_t* coords_b,
-    unsigned int dim_num);
-
-template int cmp_row_order<int>(
-    const int* coords_a, const int* coords_b, unsigned int dim_num);
-template int cmp_row_order<int64_t>(
-    const int64_t* coords_a, const int64_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<float>(
-    const float* coords_a, const float* coords_b, unsigned int dim_num);
-template int cmp_row_order<double>(
-    const double* coords_a, const double* coords_b, unsigned int dim_num);
-template int cmp_row_order<int8_t>(
-    const int8_t* coords_a, const int8_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<uint8_t>(
-    const uint8_t* coords_a, const uint8_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<int16_t>(
-    const int16_t* coords_a, const int16_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<uint16_t>(
-    const uint16_t* coords_a, const uint16_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<uint32_t>(
-    const uint32_t* coords_a, const uint32_t* coords_b, unsigned int dim_num);
-template int cmp_row_order<uint64_t>(
-    const uint64_t* coords_a, const uint64_t* coords_b, unsigned int dim_num);
-
-template int cmp_row_order<int>(
-    uint64_t id_a,
-    const int* coords_a,
-    uint64_t id_b,
-    const int* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<int64_t>(
-    uint64_t id_a,
-    const int64_t* coords_a,
-    uint64_t id_b,
-    const int64_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<float>(
-    uint64_t id_a,
-    const float* coords_a,
-    uint64_t id_b,
-    const float* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<double>(
-    uint64_t id_a,
-    const double* coords_a,
-    uint64_t id_b,
-    const double* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<int8_t>(
-    uint64_t id_a,
-    const int8_t* coords_a,
-    uint64_t id_b,
-    const int8_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<uint8_t>(
-    uint64_t id_a,
-    const uint8_t* coords_a,
-    uint64_t id_b,
-    const uint8_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<int16_t>(
-    uint64_t id_a,
-    const int16_t* coords_a,
-    uint64_t id_b,
-    const int16_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<uint16_t>(
-    uint64_t id_a,
-    const uint16_t* coords_a,
-    uint64_t id_b,
-    const uint16_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<uint32_t>(
-    uint64_t id_a,
-    const uint32_t* coords_a,
-    uint64_t id_b,
-    const uint32_t* coords_b,
-    unsigned int dim_num);
-template int cmp_row_order<uint64_t>(
-    uint64_t id_a,
-    const uint64_t* coords_a,
-    uint64_t id_b,
-    const uint64_t* coords_b,
-    unsigned int dim_num);
-
 template void expand_mbr<int>(
     int* mbr, const int* coords, unsigned int dim_num);
 template void expand_mbr<int64_t>(
@@ -833,73 +588,6 @@ template void expand_mbr<uint32_t>(
 template void expand_mbr<uint64_t>(
     uint64_t* mbr, const uint64_t* coords, unsigned int dim_num);
 
-template bool has_duplicates<std::string>(const std::vector<std::string>& v);
-
-template bool inside_subarray<int>(
-    const int* coords, const int* subarray, unsigned int dim_num);
-template bool inside_subarray<int64_t>(
-    const int64_t* coords, const int64_t* subarray, unsigned int dim_num);
-template bool inside_subarray<float>(
-    const float* coords, const float* subarray, unsigned int dim_num);
-template bool inside_subarray<double>(
-    const double* coords, const double* subarray, unsigned int dim_num);
-template bool inside_subarray<int8_t>(
-    const int8_t* coords, const int8_t* subarray, unsigned int dim_num);
-template bool inside_subarray<uint8_t>(
-    const uint8_t* coords, const uint8_t* subarray, unsigned int dim_num);
-template bool inside_subarray<int16_t>(
-    const int16_t* coords, const int16_t* subarray, unsigned int dim_num);
-template bool inside_subarray<uint16_t>(
-    const uint16_t* coords, const uint16_t* subarray, unsigned int dim_num);
-template bool inside_subarray<uint32_t>(
-    const uint32_t* coords, const uint32_t* subarray, unsigned int dim_num);
-template bool inside_subarray<uint64_t>(
-    const uint64_t* coords, const uint64_t* subarray, unsigned int dim_num);
-
-template bool intersect<std::string>(
-    const std::vector<std::string>& v1, const std::vector<std::string>& v2);
-
-template bool rect_in_rect<int>(
-    const int* range_A, const int* range_B, unsigned int dim_num);
-template bool rect_in_rect<int64_t>(
-    const int64_t* range_A, const int64_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<float>(
-    const float* range_A, const float* range_B, unsigned int dim_num);
-template bool rect_in_rect<double>(
-    const double* range_A, const double* range_B, unsigned int dim_num);
-template bool rect_in_rect<int8_t>(
-    const int8_t* range_A, const int8_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<uint8_t>(
-    const uint8_t* range_A, const uint8_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<int16_t>(
-    const int16_t* range_A, const int16_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<uint16_t>(
-    const uint16_t* range_A, const uint16_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<uint32_t>(
-    const uint32_t* range_A, const uint32_t* range_B, unsigned int dim_num);
-template bool rect_in_rect<uint64_t>(
-    const uint64_t* range_A, const uint64_t* range_B, unsigned int dim_num);
-
-template bool is_unary_subarray<int>(const int* subarray, unsigned int dim_num);
-template bool is_unary_subarray<int64_t>(
-    const int64_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<float>(
-    const float* subarray, unsigned int dim_num);
-template bool is_unary_subarray<double>(
-    const double* subarray, unsigned int dim_num);
-template bool is_unary_subarray<int8_t>(
-    const int8_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<uint8_t>(
-    const uint8_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<int16_t>(
-    const int16_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<uint16_t>(
-    const uint16_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<uint32_t>(
-    const uint32_t* subarray, unsigned int dim_num);
-template bool is_unary_subarray<uint64_t>(
-    const uint64_t* subarray, unsigned int dim_num);
-
 template bool overlap<int8_t>(
     const int8_t* a, const int8_t* b, unsigned dim_num);
 template bool overlap<uint8_t>(
@@ -918,6 +606,80 @@ template bool overlap<uint64_t>(
 template bool overlap<float>(const float* a, const float* b, unsigned dim_num);
 template bool overlap<double>(
     const double* a, const double* b, unsigned dim_num);
+
+template bool overlap<int8_t>(
+    const int8_t* a, const int8_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<uint8_t>(
+    const uint8_t* a, const uint8_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<int16_t>(
+    const int16_t* a, const int16_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<uint16_t>(
+    const uint16_t* a, const uint16_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<int>(
+    const int* a, const int* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<unsigned>(
+    const unsigned* a, const unsigned* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<int64_t>(
+    const int64_t* a, const int64_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<uint64_t>(
+    const uint64_t* a, const uint64_t* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<float>(
+    const float* a, const float* b, unsigned dim_num, bool* a_contains_b);
+template bool overlap<double>(
+    const double* a, const double* b, unsigned dim_num, bool* a_contains_b);
+
+template void overlap<int>(
+    const int* a, const int* b, unsigned dim_num, int* o, bool* overlap);
+template void overlap<int64_t>(
+    const int64_t* a,
+    const int64_t* b,
+    unsigned dim_num,
+    int64_t* o,
+    bool* overlap);
+template void overlap<float>(
+    const float* a, const float* b, unsigned dim_num, float* o, bool* overlap);
+template void overlap<double>(
+    const double* a,
+    const double* b,
+    unsigned dim_num,
+    double* o,
+    bool* overlap);
+template void overlap<int8_t>(
+    const int8_t* a,
+    const int8_t* b,
+    unsigned dim_num,
+    int8_t* o,
+    bool* overlap);
+template void overlap<uint8_t>(
+    const uint8_t* a,
+    const uint8_t* b,
+    unsigned dim_num,
+    uint8_t* o,
+    bool* overlap);
+template void overlap<int16_t>(
+    const int16_t* a,
+    const int16_t* b,
+    unsigned dim_num,
+    int16_t* o,
+    bool* overlap);
+template void overlap<uint16_t>(
+    const uint16_t* a,
+    const uint16_t* b,
+    unsigned dim_num,
+    uint16_t* o,
+    bool* overlap);
+template void overlap<uint32_t>(
+    const uint32_t* a,
+    const uint32_t* b,
+    unsigned dim_num,
+    uint32_t* o,
+    bool* overlap);
+template void overlap<uint64_t>(
+    const uint64_t* a,
+    const uint64_t* b,
+    unsigned dim_num,
+    uint64_t* o,
+    bool* overlap);
 
 template double coverage<int8_t>(
     const int8_t* a, const int8_t* b, unsigned dim_num);
@@ -938,6 +700,8 @@ template double coverage<float>(
     const float* a, const float* b, unsigned dim_num);
 template double coverage<double>(
     const double* a, const double* b, unsigned dim_num);
+
+}  // namespace geometry
 
 }  // namespace utils
 

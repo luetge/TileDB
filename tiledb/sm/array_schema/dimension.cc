@@ -48,14 +48,12 @@ namespace sm {
 Dimension::Dimension() {
   domain_ = nullptr;
   tile_extent_ = nullptr;
+  type_ = Datatype::INT32;
 }
 
-Dimension::Dimension(const std::string& name, Datatype type) {
-  // Set name
-  name_ = name;
-
-  // Set type, domain and tile extent
-  type_ = type;
+Dimension::Dimension(const std::string& name, Datatype type)
+    : name_(name)
+    , type_(type) {
   domain_ = nullptr;
   tile_extent_ = nullptr;
 }
@@ -80,10 +78,8 @@ Dimension::Dimension(const Dimension* dim) {
 
 Dimension::~Dimension() {
   // Clean up
-  if (domain_ != nullptr)
-    std::free(domain_);
-  if (tile_extent_ != nullptr)
-    std::free(tile_extent_);
+  std::free(domain_);
+  std::free(tile_extent_);
 }
 
 /* ********************************* */
@@ -91,25 +87,24 @@ Dimension::~Dimension() {
 /* ********************************* */
 
 // ===== FORMAT =====
-// dimension_name_size (unsigned int)
+// dimension_name_size (uint32_t)
 // dimension_name (string)
 // domain (void* - 2*type_size)
-// null_tile_extent (bool)
+// null_tile_extent (uint8_t)
 // tile_extent (void* - type_size)
 Status Dimension::deserialize(ConstBuffer* buff, Datatype type) {
   // Set type
   type_ = type;
 
   // Load dimension name
-  unsigned int dimension_name_size;
-  RETURN_NOT_OK(buff->read(&dimension_name_size, sizeof(unsigned int)));
+  uint32_t dimension_name_size;
+  RETURN_NOT_OK(buff->read(&dimension_name_size, sizeof(uint32_t)));
   name_.resize(dimension_name_size);
   RETURN_NOT_OK(buff->read(&name_[0], dimension_name_size));
 
   // Load domain
   uint64_t domain_size = 2 * datatype_size(type_);
-  if (domain_ != nullptr)
-    std::free(domain_);
+  std::free(domain_);
   domain_ = std::malloc(domain_size);
   if (domain_ == nullptr)
     return LOG_STATUS(
@@ -117,12 +112,11 @@ Status Dimension::deserialize(ConstBuffer* buff, Datatype type) {
   RETURN_NOT_OK(buff->read(domain_, domain_size));
 
   // Load tile extent
-  if (tile_extent_ != nullptr)
-    std::free(tile_extent_);
+  std::free(tile_extent_);
   tile_extent_ = nullptr;
-  bool null_tile_extent;
-  RETURN_NOT_OK(buff->read(&null_tile_extent, sizeof(bool)));
-  if (!null_tile_extent) {
+  uint8_t null_tile_extent;
+  RETURN_NOT_OK(buff->read(&null_tile_extent, sizeof(uint8_t)));
+  if (null_tile_extent == 0) {
     tile_extent_ = std::malloc(datatype_size(type_));
     if (tile_extent_ == nullptr) {
       return LOG_STATUS(Status::DimensionError(
@@ -140,8 +134,9 @@ void* Dimension::domain() const {
 
 void Dimension::dump(FILE* out) const {
   // Retrieve domain and tile extent strings
-  std::string domain_s = utils::domain_str(domain_, type_);
-  std::string tile_extent_s = utils::tile_extent_str(tile_extent_, type_);
+  std::string domain_s = utils::parse::domain_str(domain_, type_);
+  std::string tile_extent_s =
+      utils::parse::tile_extent_str(tile_extent_, type_);
 
   // Dump
   fprintf(out, "### Dimension ###\n");
@@ -156,14 +151,14 @@ const std::string& Dimension::name() const {
 
 bool Dimension::is_anonymous() const {
   return name_.empty() ||
-         utils::starts_with(name_, constants::default_dim_name);
+         utils::parse::starts_with(name_, constants::default_dim_name);
 }
 
 // ===== FORMAT =====
-// dimension_name_size (unsigned int)
+// dimension_name_size (uint32_t)
 // dimension_name (string)
 // domain (void* - 2*type_size)
-// null_tile_extent (bool)
+// null_tile_extent (uint8_t)
 // tile_extent (void* - type_size)
 Status Dimension::serialize(Buffer* buff) {
   // Sanity check
@@ -173,16 +168,16 @@ Status Dimension::serialize(Buffer* buff) {
   }
 
   // Write dimension name
-  auto dimension_name_size = (unsigned int)name_.size();
-  RETURN_NOT_OK(buff->write(&dimension_name_size, sizeof(unsigned int)));
+  auto dimension_name_size = (uint32_t)name_.size();
+  RETURN_NOT_OK(buff->write(&dimension_name_size, sizeof(uint32_t)));
   RETURN_NOT_OK(buff->write(name_.c_str(), dimension_name_size));
 
   // Write domain and tile extent
   uint64_t domain_size = 2 * datatype_size(type_);
   RETURN_NOT_OK(buff->write(domain_, domain_size));
 
-  bool null_tile_extent = (tile_extent_ == nullptr);
-  RETURN_NOT_OK(buff->write(&null_tile_extent, sizeof(bool)));
+  auto null_tile_extent = (uint8_t)((tile_extent_ == nullptr) ? 1 : 0);
+  RETURN_NOT_OK(buff->write(&null_tile_extent, sizeof(uint8_t)));
   if (tile_extent_ != nullptr)
     RETURN_NOT_OK(buff->write(tile_extent_, datatype_size(type_)));
 
@@ -190,8 +185,7 @@ Status Dimension::serialize(Buffer* buff) {
 }
 
 Status Dimension::set_domain(const void* domain) {
-  if (domain_ != nullptr)
-    std::free(domain_);
+  std::free(domain_);
 
   if (domain == nullptr) {
     domain_ = nullptr;
@@ -216,9 +210,11 @@ Status Dimension::set_domain(const void* domain) {
 }
 
 Status Dimension::set_tile_extent(const void* tile_extent) {
-  if (tile_extent_ != nullptr)
-    std::free(tile_extent_);
+  if (domain_ == nullptr)
+    return Status::DimensionError(
+        "Cannot set tile extent; Domain must be set first");
 
+  std::free(tile_extent_);
   if (tile_extent == nullptr) {
     tile_extent_ = nullptr;
     return Status::Ok();
@@ -245,6 +241,10 @@ Status Dimension::set_null_tile_extent_to_range() {
   // Applicable only to null extents
   if (tile_extent_ != nullptr)
     return Status::Ok();
+
+  if (domain_ == nullptr)
+    return LOG_STATUS(Status::DimensionError(
+        "Cannot set tile extent to domain range; Domain not set"));
 
   // Note: this is applicable only to dense array, which are allowed
   // only integer domains
@@ -361,6 +361,16 @@ Status Dimension::check_domain() const {
         Status::DimensionError("Domain check failed; Upper domain bound should "
                                "not be smaller than the lower one"));
 
+  // Domain range must not exceed the maximum uint64_t number
+  // for integer domains
+  if (std::is_integral<T>::value) {
+    uint64_t diff = domain[1] - domain[0];
+    if (diff == std::numeric_limits<uint64_t>::max())
+      return LOG_STATUS(Status::DimensionError(
+          "Domain check failed; Domain range (upper + lower + 1) is larger "
+          "than the maximum uint64 number"));
+  }
+
   return Status::Ok();
 }
 
@@ -400,35 +410,50 @@ Status Dimension::check_tile_extent() const {
 
   auto tile_extent = static_cast<T*>(tile_extent_);
   auto domain = static_cast<T*>(domain_);
+  bool is_int = std::is_integral<T>::value;
+
+  // Check if tile extent is negative or 0
+  if (*tile_extent <= 0)
+    return LOG_STATUS(Status::DimensionError(
+        "Tile extent check failed; Tile extent must be greater than 0"));
 
   // Check if tile extent exceeds domain
-  if (&typeid(T) == &typeid(float) || &typeid(T) == &typeid(double)) {
+  if (!is_int) {
     if (*tile_extent > domain[1] - domain[0])
       return LOG_STATUS(
           Status::DimensionError("Tile extent check failed; Tile extent "
                                  "exceeds dimension domain range"));
   } else {
     // Check if tile extent exceeds domain
-    // TODO (sp): Handle negative domains
-    if ((domain[1] - domain[0] < std::numeric_limits<T>::max() - 1) &&
-        (*tile_extent > domain[1] - domain[0] + 1))
+    uint64_t range = domain[1] - domain[0] + 1;
+    if (uint64_t(*tile_extent) > range)
       return LOG_STATUS(
           Status::DimensionError("Tile extent check failed; Tile extent "
                                  "exceeds dimension domain range"));
-  }
 
-  // In the worst case one tile_extent will be added to the upper domain,
-  // so check if the expanded domain will exceed type T's max limit.
-  auto upper_floor = (domain[1] / (*tile_extent)) * (*tile_extent);
-  if (upper_floor != domain[1] &&
-      upper_floor > std::numeric_limits<T>::max() - (*tile_extent))
-    return LOG_STATUS(Status::DimensionError(
-        "Tile extent check failed; domain max expanded to multiple of tile "
-        "extent exceeds max value representable by domain type. Reduce domain "
-        "max by 1 tile extent to allow for expansion."));
+    // In the worst case one tile extent will be added to the upper domain
+    // for the dense case, so check if the expanded domain will exceed type
+    // T's max limit.
+    if (range % uint64_t(*tile_extent)) {
+      auto upper_floor =
+          ((range - 1) / (*tile_extent)) * (*tile_extent) + domain[0];
+      bool exceeds =
+          (upper_floor >
+           std::numeric_limits<uint64_t>::max() - (*tile_extent - 1));
+      exceeds =
+          (exceeds ||
+           uint64_t(upper_floor) > uint64_t(std::numeric_limits<T>::max()));
+      if (exceeds)
+        return LOG_STATUS(Status::DimensionError(
+            "Tile extent check failed; domain max expanded to multiple of tile "
+            "extent exceeds max value representable by domain type. Reduce "
+            "domain max by 1 tile extent to allow for expansion."));
+    }
+  }
 
   return Status::Ok();
 }
 
 }  // namespace sm
+
 }  // namespace tiledb

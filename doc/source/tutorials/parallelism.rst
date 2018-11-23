@@ -20,34 +20,59 @@ parallelization within the query. TileDB uses the
 `Intel Threaded Building Blocks <https://www.threadingbuildingblocks.org/>`__
 library for efficient scheduling and load balancing.
 
-For reads, TileDB uses the following nested parallelism strategy::
+Filtering
+~~~~~~~~~
+
+For filtering (such as compression) during read queries, TileDB uses the
+following nested parallelism strategy::
 
     parallel_for_each attribute being read:
       parallel_for_each tile of the attribute overlapping the subarray:
         parallel_for_each chunk of the tile:
-          decompress chunk
+          filter chunk
 
-The "chunks" of a tile are controlled by an internal TileDB parameter
-set to 64KB that is currently not modifiable by users. The nested parallelism
-in reads allows
-for maximum utilization of the available cores for decompression, in either
-the case where the query intersects few large tiles or many small tiles.
-For writes, TileDB uses a similar strategy to reads::
+The "chunks" of a tile are controlled by a TileDB filter list parameter
+that defaults to 64KB. See the :ref:`filters` tutorial to see how.
+
+The nested parallelism in reads allows for maximum utilization of the available
+cores for filtering (e.g. decompression), in either the case where the query
+intersects few large tiles or many small tiles. For writes, TileDB uses the same
+strategy as reads::
+
 
     parallel_for_each attribute being written:
-      for_each tile of the attribute being written:
+      parallel_for_each tile of the attribute being written:
         parallel_for_each chunk of the tile:
-          compress chunk
+          filter chunk
 
-Currently TileDB does not parallelize over the tiles of each attribute being
-written.
-
-The configuration parameter ``sm.number_of_threads`` controls the number of
+The configuration parameter ``sm.num_async_threads`` controls the number of
 threads available for use by asynchronous queries. It does not impact the
-parallelism used in the ``for`` loops illustrated above.
+parallelism used in the ``for`` loops illustrated above. Instead, the
+``sm.num_tbb_threads`` parameter impacts the ``for`` loops above, although it is
+not recommended to modify this configuration parameter from its default setting.
+
+I/O
+~~~
+
+After the tiles are filtered during a write query (or before filtering
+during read queries), I/O operations are issued
+to the underlying persistent storage via TileDB's virtual filesystem (VFS)
+layer. For write queries, the configuration parameter ``sm.num_writer_threads``
+controls the maximum number of write operations that will be dispatched in
+parallel to the VFS layer. For reads, the configuration parameter is
+``sm.num_reader_threads``. Both default to 1.
+
+For flexibility in controlling the number of threads used for these parallel
+calls into the VFS layer, TileDB does not use TBB for these operations. Instead,
+a list of read or write tasks is accumulated during the query (one task per tile
+being read or written, per attribute) and dispatched to a thread pool with a work
+queue. The size of the thread pool is determined by the above configuration
+parameters.
 
 VFS Operations
 --------------
+
+The VFS layer is additionally parallelized independently of the queries.
 Read VFS operations are parallelized
 internally using a private thread pool. This allows large reads to be
 split up and performed in parallel. Parallel VFS IO is enabled by default,

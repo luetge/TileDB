@@ -39,30 +39,43 @@ list(APPEND TILEDB_CORE_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../tiledb/sm/c_
 
 # Gather the test source files
 set(TILEDB_TEST_SOURCES
+  src/helpers.h
+  src/unit-backwards_compat.cc
   src/unit-buffer.cc
   src/unit-capi-any.cc
   src/unit-capi-array_schema.cc
   src/unit-capi-async.cc
+  src/unit-capi-array.cc
   src/unit-capi-config.cc
   src/unit-capi-consistency.cc
   src/unit-capi-consolidation.cc
   src/unit-capi-dense_array.cc
+  src/unit-capi-dense_neg.cc
   src/unit-capi-dense_vector.cc
+  src/unit-capi-enum_values.cc
   src/unit-capi-error.cc
+  src/unit-capi-filter.cc
   src/unit-capi-incomplete.cc
   src/unit-capi-kv.cc
   src/unit-capi-object_mgmt.cc
+  src/unit-capi-query.cc
   src/unit-capi-sparse_array.cc
+  src/unit-capi-sparse_neg.cc
+  src/unit-capi-sparse_real.cc
   src/unit-capi-string.cc
   src/unit-capi-uri.cc
   src/unit-capi-version.cc
   src/unit-capi-vfs.cc
   src/unit-compression-dd.cc
   src/unit-compression-rle.cc
+  src/unit-encryption.cc
+  src/unit-filter-buffer.cc
+  src/unit-filter-pipeline.cc
   src/unit-hdfs-filesystem.cc
   src/unit-lru_cache.cc
   src/unit-s3.cc
   src/unit-status.cc
+  src/unit-tbb.cc
   src/unit-threadpool.cc
   src/unit-uri.cc
   src/unit-uuid.cc
@@ -74,9 +87,11 @@ if (TILEDB_CPP_API)
   list(APPEND TILEDB_TEST_SOURCES
     src/unit-cppapi-array.cc
     src/unit-cppapi-config.cc
+    src/unit-cppapi-filter.cc
     src/unit-cppapi-map.cc
     src/unit-cppapi-schema.cc
     src/unit-cppapi-type.cc
+    src/unit-cppapi-updates.cc
     src/unit-cppapi-util.cc
   )
 endif()
@@ -116,9 +131,17 @@ if (TILEDB_TESTS_AWS_S3_CONFIG)
   target_compile_definitions(tiledb_unit PRIVATE -DTILEDB_TESTS_AWS_S3_CONFIG)
 endif()
 
+if (TILEDB_TBB)
+  target_compile_definitions(tiledb_unit PRIVATE -DHAVE_TBB)
+endif()
+
 # This is necessary only because we are linking directly to the core objects.
 # Other users (e.g. the examples) do not need this flag.
 target_compile_definitions(tiledb_unit PRIVATE -DTILEDB_CORE_OBJECTS_EXPORTS)
+
+target_compile_definitions(tiledb_unit PRIVATE
+  -DTILEDB_TEST_INPUTS_DIR="${CMAKE_CURRENT_SOURCE_DIR}/inputs"
+)
 
 add_test(
   NAME "tiledb_unit"

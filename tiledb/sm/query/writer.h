@@ -34,9 +34,11 @@
 #define TILEDB_WRITER_H
 
 #include "tiledb/sm/array_schema/array_schema.h"
+#include "tiledb/sm/filter/filter_pipeline.h"
 #include "tiledb/sm/fragment/fragment_metadata.h"
 #include "tiledb/sm/misc/status.h"
 #include "tiledb/sm/query/dense_cell_range_iter.h"
+#include "tiledb/sm/query/types.h"
 #include "tiledb/sm/tile/tile.h"
 
 #include <memory>
@@ -45,6 +47,7 @@
 namespace tiledb {
 namespace sm {
 
+class Array;
 class StorageManager;
 
 /** Processes write queries. */
@@ -53,44 +56,6 @@ class Writer {
   /* ********************************* */
   /*          TYPE DEFINITIONS         */
   /* ********************************* */
-
-  /** Contains the buffer(s) and buffer size(s) for some attribute. */
-  struct AttributeBuffer {
-    /**
-     * The attribute buffer. In case the attribute is var-sized, this is
-     * the offsets buffer.
-     */
-    void* buffer_;
-    /**
-     * For a var-sized attribute, this is the data buffer. It is `nullptr`
-     * for fixed-sized attributes.
-     */
-    void* buffer_var_;
-    /** The size (in bytes) of `buffer_`. */
-    uint64_t* buffer_size_;
-    /** The size (in bytes) of `buffer_var_`. */
-    uint64_t* buffer_var_size_;
-
-    /** Constructor. */
-    AttributeBuffer() {
-      buffer_ = nullptr;
-      buffer_var_ = nullptr;
-      buffer_size_ = nullptr;
-      buffer_var_size_ = nullptr;
-    }
-
-    /** Constructor. */
-    AttributeBuffer(
-        void* buffer,
-        void* buffer_var,
-        uint64_t* buffer_size,
-        uint64_t* buffer_var_size)
-        : buffer_(buffer)
-        , buffer_var_(buffer_var)
-        , buffer_size_(buffer_size)
-        , buffer_var_size_(buffer_var_size) {
-    }
-  };
 
   /**
    * State used only in global writes, where the user can "append"
@@ -152,14 +117,61 @@ class Writer {
   /** Returns the array schema. */
   const ArraySchema* array_schema() const;
 
+  /**
+   * Return list of attribtues for query
+   * @return vector of attributes for query
+   */
+  std::vector<std::string> attributes() const;
+
+  /**
+   * Fetch AttributeBuffer for attribute
+   * @param attribute to fetch
+   * @return AttributeBuffer for attribute
+   */
+  AttributeBuffer buffer(const std::string& attribute) const;
+
   /** Finalizes the reader. */
   Status finalize();
+
+  /**
+   * Retrieves the buffer of a fixed-sized attribute.
+   *
+   * @param attribute The buffer attribute.
+   * @param buffer The buffer to be retrieved.
+   * @param buffer_size A pointer to the buffer size to be retrieved.
+   * @return Status
+   */
+  Status get_buffer(
+      const std::string& attribute,
+      void** buffer,
+      uint64_t** buffer_size) const;
+
+  /**
+   * Retrieves the offsets and values buffers of a var-sized attribute.
+   *
+   * @param attribute The buffer attribute.
+   * @param buffer_off The offsets buffer to be retrieved.
+   * @param buffer_off_size A pointer to the offsets buffer size to be
+   * retrieved.
+   * @param buffer_val The values buffer to be retrieved.
+   * @param buffer_val_size A pointer to the values buffer size to be retrieved.
+   * @return Status
+   */
+  Status get_buffer(
+      const std::string& attribute,
+      uint64_t** buffer_off,
+      uint64_t** buffer_off_size,
+      void** buffer_val,
+      uint64_t** buffer_val_size) const;
 
   /** Initializes the writer. */
   Status init();
 
   /** Returns the cell layout. */
   Layout layout() const;
+
+  /** Sets the array. */
+  void set_array(const Array* array);
 
   /*
    * Sets the array schema. If the array is a kv store, then this
@@ -220,6 +232,12 @@ class Writer {
    */
   Status set_subarray(const void* subarray);
 
+  /*
+   * Return the subarray
+   * @return subarray
+   */
+  void* subarray() const;
+
   /** Performs a write query using its set members. */
   Status write();
 
@@ -227,6 +245,9 @@ class Writer {
   /* ********************************* */
   /*         PRIVATE ATTRIBUTES        */
   /* ********************************* */
+
+  /** The array. */
+  const Array* array_;
 
   /** The array schema. */
   const ArraySchema* array_schema_;
@@ -244,6 +265,14 @@ class Writer {
    * duplicates are found.
    */
   bool check_coord_dups_;
+
+  /**
+   * If `true`, a check for coordinates lying out-of-bounds (i.e.,
+   * outside the array domain) will be performed upon
+   * sparse writes and appropriate errors will be thrown in case
+   * such coordinates are found.
+   */
+  bool check_coord_oob_;
 
   /**
    * If `true`, deduplication of coordinates/cells will happen upon
@@ -292,6 +321,24 @@ class Writer {
    * @return Status
    */
   Status check_coord_dups(const std::vector<uint64_t>& cell_pos) const;
+
+  /**
+   * Throws an error if there are coordinates falling out-of-bounds, i.e.,
+   * outside the array domain.
+   *
+   * @return Status
+   */
+  Status check_coord_oob() const;
+
+  /**
+   * Throws an error if there are coordinates falling out-of-bounds, i.e.,
+   * outside the array domain.
+   *
+   * @tparam T The coordinates type.
+   * @return Status
+   */
+  template <class T>
+  Status check_coord_oob() const;
 
   /**
    * Throws an error if there are coordinate duplicates. This function
@@ -380,6 +427,30 @@ class Writer {
    */
   Status create_fragment(
       bool dense, std::shared_ptr<FragmentMetadata>* frag_meta) const;
+
+  /**
+   * Runs the input tiles for the input attribute through the filter pipeline.
+   * The tile buffers are modified to contain the output of the pipeline.
+   *
+   * @param attribute The attribute the tiles belong to.
+   * @param tile The tiles to be filtered.
+   * @return Status
+   */
+  Status filter_tiles(
+      const std::string& attribute, std::vector<Tile>* tiles) const;
+
+  /**
+   * Runs the input tile for the input attribute through the filter pipeline.
+   * The tile buffer is modified to contain the output of the pipeline.
+   *
+   * @param attribute The attribute the tile belong to.
+   * @param tile The tile to be filtered.
+   * @param offsets True if the tile to be filtered contains offsets for a
+   *    var-sized attribute.
+   * @return Status
+   */
+  Status filter_tile(
+      const std::string& attribute, Tile* tile, bool offsets) const;
 
   /** Finalizes the global write state. */
   Status finalize_global_write_state();
@@ -481,9 +552,10 @@ class Writer {
    * by removing the leading '.' character.
    *
    * @param frag_uri Will store the new special fragment name
+   * @param timestamp The timestamp of the fragment name creation.
    * @return Status
    */
-  Status new_fragment_name(std::string* frag_uri) const;
+  Status new_fragment_name(std::string* frag_uri, uint64_t* timestamp) const;
 
   /**
    * This deletes the global write state and deletes the potentially
@@ -727,6 +799,16 @@ class Writer {
       Tile* tile_var) const;
 
   /**
+   * Writes all the input tiles to storage.
+   *
+   * @param attribute_tiles Tiles to be written, one element per attribute.
+   * @return Status
+   */
+  Status write_all_tiles(
+      FragmentMetadata* frag_meta,
+      const std::vector<std::vector<Tile>>& attribute_tiles) const;
+
+  /**
    * Writes the input tiles for the input attribute to storage.
    *
    * @param attribute The attribute the tiles belong to.
@@ -737,7 +819,7 @@ class Writer {
   Status write_tiles(
       const std::string& attribute,
       FragmentMetadata* frag_meta,
-      std::vector<Tile>& tiles) const;
+      const std::vector<Tile>& tiles) const;
 };
 
 }  // namespace sm

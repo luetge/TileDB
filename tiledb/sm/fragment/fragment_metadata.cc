@@ -55,13 +55,17 @@ namespace sm {
 /* ****************************** */
 
 FragmentMetadata::FragmentMetadata(
-    const ArraySchema* array_schema, bool dense, const URI& fragment_uri)
+    const ArraySchema* array_schema,
+    bool dense,
+    const URI& fragment_uri,
+    uint64_t timestamp)
     : array_schema_(array_schema)
     , dense_(dense)
-    , fragment_uri_(fragment_uri) {
+    , fragment_uri_(fragment_uri)
+    , timestamp_(timestamp) {
   domain_ = nullptr;
   non_empty_domain_ = nullptr;
-  std::memcpy(version_, constants::version, sizeof(version_));
+  version_ = constants::format_version;
   tile_index_base_ = 0;
 
   auto attributes = array_schema_->attributes();
@@ -81,21 +85,16 @@ FragmentMetadata::FragmentMetadata(
 }
 
 FragmentMetadata::~FragmentMetadata() {
-  if (domain_ != nullptr)
-    std::free(domain_);
-
-  if (non_empty_domain_ != nullptr)
-    std::free(non_empty_domain_);
+  std::free(domain_);
+  std::free(non_empty_domain_);
 
   auto mbr_num = (uint64_t)mbrs_.size();
   for (uint64_t i = 0; i < mbr_num; ++i)
-    if (mbrs_[i] != nullptr)
-      std::free(mbrs_[i]);
+    std::free(mbrs_[i]);
 
   auto bounding_coords_num = (uint64_t)bounding_coords_.size();
   for (uint64_t i = 0; i < bounding_coords_num; ++i)
-    if (bounding_coords_[i] != nullptr)
-      std::free(bounding_coords_[i]);
+    std::free(bounding_coords_[i]);
 }
 
 /* ****************************** */
@@ -245,7 +244,7 @@ Status FragmentMetadata::add_max_buffer_sizes_sparse(
   unsigned tid = 0;
   auto dim_num = array_schema_->dim_num();
   for (auto& mbr : mbrs_) {
-    if (utils::overlap(static_cast<T*>(mbr), subarray, dim_num)) {
+    if (utils::geometry::overlap(static_cast<T*>(mbr), subarray, dim_num)) {
       for (auto& it : *buffer_sizes) {
         if (array_schema_->var_size(it.first)) {
           auto cell_num = this->cell_num(tid);
@@ -306,11 +305,12 @@ Status FragmentMetadata::add_est_read_buffer_sizes_sparse(
   auto dim_num = array_schema_->dim_num();
   auto subarray_overlap = new T[2 * dim_num];
   unsigned tid = 0;
-  auto domain = array_schema_->domain();
   for (auto& mbr : mbrs_) {
-    domain->subarray_overlap((T*)mbr, subarray, subarray_overlap, &overlap);
+    utils::geometry::overlap(
+        (T*)mbr, subarray, dim_num, subarray_overlap, &overlap);
     if (overlap) {
-      double cov = utils::coverage(subarray_overlap, (T*)mbr, dim_num);
+      double cov =
+          utils::geometry::coverage(subarray_overlap, (T*)mbr, dim_num);
       for (auto& it : *buffer_sizes) {
         if (array_schema_->var_size(it.first)) {
           it.second.first += cov * tile_size(it.first, tid);
@@ -360,6 +360,10 @@ uint64_t FragmentMetadata::file_var_sizes(const std::string& attribute) const {
   auto it = attribute_idx_map_.find(attribute);
   auto attribute_id = it->second;
   return file_var_sizes_[attribute_id];
+}
+
+uint32_t FragmentMetadata::format_version() const {
+  return version_;
 }
 
 const URI& FragmentMetadata::fragment_uri() const {
@@ -516,35 +520,24 @@ uint64_t FragmentMetadata::file_var_offset(
   return tile_var_offsets_[attribute_id][tile_idx];
 }
 
-uint64_t FragmentMetadata::compressed_tile_size(
+uint64_t FragmentMetadata::persisted_tile_size(
     const std::string& attribute, uint64_t tile_idx) const {
   auto it = attribute_idx_map_.find(attribute);
   auto attribute_id = it->second;
-
-  // Check if the tile is not compressed
-  if (array_schema_->var_size(attribute)) {
-    if (constants::cell_var_offsets_compression == Compressor::NO_COMPRESSION)
-      return 0;  // Uncompressed offsets tile
-  } else {
-    if (array_schema_->compression(attribute) == Compressor::NO_COMPRESSION)
-      return 0;  // Uncompressed fix-sized value tile
-  }
-
   auto tile_num = this->tile_num();
+
   return (tile_idx != tile_num - 1) ?
              tile_offsets_[attribute_id][tile_idx + 1] -
                  tile_offsets_[attribute_id][tile_idx] :
              file_sizes_[attribute_id] - tile_offsets_[attribute_id][tile_idx];
 }
 
-uint64_t FragmentMetadata::compressed_tile_var_size(
+uint64_t FragmentMetadata::persisted_tile_var_size(
     const std::string& attribute, uint64_t tile_idx) const {
   auto it = attribute_idx_map_.find(attribute);
   auto attribute_id = it->second;
-  if (array_schema_->compression(attribute) == Compressor::NO_COMPRESSION)
-    return 0;
-
   auto tile_num = this->tile_num();
+
   return (tile_idx != tile_num - 1) ?
              tile_var_offsets_[attribute_id][tile_idx + 1] -
                  tile_var_offsets_[attribute_id][tile_idx] :
@@ -567,6 +560,16 @@ uint64_t FragmentMetadata::tile_var_size(
   return tile_var_sizes_[attribute_id][tile_idx];
 }
 
+uint64_t FragmentMetadata::timestamp() const {
+  return timestamp_;
+}
+
+bool FragmentMetadata::operator<(const FragmentMetadata& metadata) const {
+  return (timestamp_ < metadata.timestamp_) ||
+         (timestamp_ == metadata.timestamp_ &&
+          fragment_uri_ < metadata.fragment_uri_);
+}
+
 /* ****************************** */
 /*        PRIVATE METHODS         */
 /* ****************************** */
@@ -580,7 +583,7 @@ std::vector<uint64_t> FragmentMetadata::compute_overlapping_tile_ids(
   auto metadata_domain = static_cast<const T*>(domain_);
 
   // Check if there is any overlap
-  if (!utils::overlap(subarray, metadata_domain, dim_num))
+  if (!utils::geometry::overlap(subarray, metadata_domain, dim_num))
     return tids;
 
   // Initialize subarray tile domain
@@ -599,7 +602,8 @@ std::vector<uint64_t> FragmentMetadata::compute_overlapping_tile_ids(
     tile_pos = domain->get_tile_pos(metadata_domain, tile_coords);
     tids.emplace_back(tile_pos);
     domain->get_next_tile_coords(subarray_tile_domain, tile_coords);
-  } while (utils::coords_in_rect(tile_coords, subarray_tile_domain, dim_num));
+  } while (utils::geometry::coords_in_rect(
+      tile_coords, subarray_tile_domain, dim_num));
 
   // Clean up
   delete[] subarray_tile_domain;
@@ -617,7 +621,7 @@ FragmentMetadata::compute_overlapping_tile_ids_cov(const T* subarray) const {
   auto metadata_domain = static_cast<const T*>(domain_);
 
   // Check if there is any overlap
-  if (!utils::overlap(subarray, metadata_domain, dim_num))
+  if (!utils::geometry::overlap(subarray, metadata_domain, dim_num))
     return tids;
 
   // Initialize subarray tile domain
@@ -639,13 +643,15 @@ FragmentMetadata::compute_overlapping_tile_ids_cov(const T* subarray) const {
   uint64_t tile_pos;
   do {
     domain->get_tile_subarray(metadata_domain, tile_coords, tile_subarray);
-    domain->subarray_overlap(subarray, tile_subarray, tile_overlap, &overlap);
+    utils::geometry::overlap(
+        subarray, tile_subarray, dim_num, tile_overlap, &overlap);
     assert(overlap);
-    cov = utils::coverage(tile_overlap, tile_subarray, dim_num);
+    cov = utils::geometry::coverage(tile_overlap, tile_subarray, dim_num);
     tile_pos = domain->get_tile_pos(metadata_domain, tile_coords);
     tids.emplace_back(tile_pos, cov);
     domain->get_next_tile_coords(subarray_tile_domain, tile_coords);
-  } while (utils::coords_in_rect(tile_coords, subarray_tile_domain, dim_num));
+  } while (utils::geometry::coords_in_rect(
+      tile_coords, subarray_tile_domain, dim_num));
 
   // Clean up
   delete[] subarray_tile_domain;
@@ -694,10 +700,10 @@ Status FragmentMetadata::expand_non_empty_domain(const T* mbr) {
   for (unsigned i = 0; i < dim_num; ++i)
     coords[i] = mbr[2 * i];
   auto non_empty_domain = static_cast<T*>(non_empty_domain_);
-  utils::expand_mbr(non_empty_domain, coords, dim_num);
+  utils::geometry::expand_mbr(non_empty_domain, coords, dim_num);
   for (unsigned i = 0; i < dim_num; ++i)
     coords[i] = mbr[2 * i + 1];
-  utils::expand_mbr(non_empty_domain, coords, dim_num);
+  utils::geometry::expand_mbr(non_empty_domain, coords, dim_num);
   delete[] coords;
 
   return Status::Ok();
@@ -971,9 +977,9 @@ Status FragmentMetadata::load_tile_var_sizes(ConstBuffer* buff) {
 }
 
 // ===== FORMAT =====
-// version (int[3])
+// version (uint32_t)
 Status FragmentMetadata::load_version(ConstBuffer* buff) {
-  RETURN_NOT_OK(buff->read(version_, sizeof(version_)));
+  RETURN_NOT_OK(buff->read(&version_, sizeof(uint32_t)));
   return Status::Ok();
 }
 
@@ -1221,9 +1227,9 @@ Status FragmentMetadata::write_tile_var_sizes(Buffer* buff) {
 }
 
 // ===== FORMAT =====
-// version (int[3])
+// version (uint32_t)
 Status FragmentMetadata::write_version(Buffer* buff) {
-  RETURN_NOT_OK(buff->write(constants::version, sizeof(constants::version)));
+  RETURN_NOT_OK(buff->write(&version_, sizeof(uint32_t)));
   return Status::Ok();
 }
 

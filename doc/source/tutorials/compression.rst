@@ -1,8 +1,8 @@
 Compression
 ===========
 
-In this tutorial you will learn all about compression in TileDB. It is
-highly recommended that you read the tutorials on attributes and
+In this tutorial you will learn more about compression in TileDB. It is
+highly recommended that you read the tutorials on attributes, filtering, and
 tiling dense/sparse arrays first.
 
 
@@ -13,13 +13,8 @@ Basic concepts and definitions
     :header: **Attribute-based compression**
 
     TileDB allows you to choose a different compression scheme for
-    each attribute.
-
-.. toggle-header::
-    :header: **Tile-based compression**
-
-    The data tile is the atomic unit of compression, i.e., each
-    data tile is compressed separately.
+    each attribute by using filter lists. Compression in TileDB always occurs
+    as a separate filter in a filter list.
 
 .. toggle-header::
     :header: **Compression tradeoff**
@@ -32,10 +27,11 @@ Compressing arrays
 ------------------
 
 The data types and values of the array cells most likely vary across attributes.
-Therefore, it is desirable to allow defining a different compression scheme
-per attribute, since different compressors may be more effective for different
-types of data. Here is how you specify the compressor when defining an attribute
-upon array creation:
+Therefore, it is desirable to allow defining a different compression scheme per
+attribute, since different compressors may be more effective for different
+types of data. Compression in TileDB always occurs as a separate filter in a
+filter list. You specify the compressor in the filter list when defining an
+attribute upon array creation.
 
 .. content-tabs::
 
@@ -47,7 +43,9 @@ upon array creation:
         Context ctx;
         ArraySchema schema(ctx, TILEDB_DENSE);
         auto a = Attribute::create<int>(ctx, "a");
-        a.set_compressor({TILEDB_GZIP, -1});
+        FilterList filters(ctx);
+        filters.add_filter({ctx, TILEDB_FILTER_GZIP});
+        a.filters(filters);
         schema.add_attribute(a);
 
    .. tab-container:: python
@@ -56,20 +54,15 @@ upon array creation:
       .. code-block:: python
 
         ctx = tiledb.Ctx()
-        attr = tiledb.Attr(ctx, name="a", dtype=np.int32, compressor=("gzip", -1))
+        attr = tiledb.Attr(ctx, name="a", dtype=np.int32,
+                           filters=tiledb.FilterList(ctx, [tiledb.GzipFilter(ctx)]))
         schema = tiledb.ArraySchema(ctx, domain=dom, sparse=False, attrs=[attr])
 
-TileDB offers a variety of compressors to choose from (see below). Moreover,
-you can adjust the compression level (the second argument in the function
-setter above - ``-1`` means "default compression level"). If a compressor
-is not specified, TileDB will use no compression by default.
-
-When compressing the data tiles of an attribute, TileDB stores some
-necessary metadata in file ``__fragment_metadata.tdb``, such as the
-starting location of each compressed tile and the original tile size
-in the case of variable-length attributes (recall that the original tile
-size has fixed size for fixed-length attributes in *both* dense and
-sparse arrays).
+TileDB offers a variety of compressors to choose from (see below). Moreover, you
+can adjust the compression level (by setting the ``TILEDB_COMPRESSION_LEVEL``
+option on the compression filter, where ``-1`` means "default compression
+level"). If a compressor filter is not added to an attribute, TileDB will not
+compress that attribute.
 
 You can also specify a different compressor for the coordinates
 tiles as follows (the default is ZSTD with default compression level):
@@ -81,14 +74,16 @@ tiles as follows (the default is ZSTD with default compression level):
 
       .. code-block:: c++
 
-        schema.set_coords_compressor({TILEDB_LZ4, -1});
+        FilterList coords_filters(ctx);
+        coords_filters.add_filter({ctx, TILEDB_LZ4});
+        schema.set_coords_filter_list(coords_filters);
 
    .. tab-container:: python
       :title: Python
 
       .. code-block:: python
 
-        schema = tiledb.ArraySchema(..., coords_compressor=("lz4", -1))
+        schema = tiledb.ArraySchema(..., coords_filters=tiledb.FilterList(ctx, [tiledb.LZ4Filter(ctx)]))
 
 To maximize the effect of compression on coordinates, TileDB first
 unzips the coordinates tuples and groups the coordinates along
@@ -111,14 +106,16 @@ data tiles (the default is ZSTD with default compression level):
 
       .. code-block:: c++
 
-        schema.set_offsets_compressor({TILEDB_BZIP2, -1});
+        FilterList offsets_filters(ctx);
+        offsets_filters.add_filter({ctx, TILEDB_BZIP2});
+        schema.set_offsets_filter_list(offsets_filters);
 
    .. tab-container:: python
       :title: Python
 
       .. code-block:: python
 
-        schema = tiledb.ArraySchema(..., offsets_compressor=("bzip2", -1))
+        schema = tiledb.ArraySchema(..., offsets_filters=tiledb.FilterList(ctx, [tiledb.Bzip2Filter(ctx)]))
 
 Choosing a compressor
 ---------------------
@@ -127,7 +124,6 @@ TileDB offers a variety of compressors to choose from:
 
     -  `GZIP <http://www.zlib.net/>`__
     -  `Zstandard <http://facebook.github.io/zstd/>`__
-    -  `Blosc <http://blosc.org/>`__
     -  `LZ4 <https://github.com/lz4/lz4>`__
     -  `RLE <https://en.wikipedia.org/wiki/Run-length_encoding>`__
     -  `Bzip2 <http://www.bzip.org/>`__
@@ -141,16 +137,12 @@ contrast to Gorilla’s variable bitsize). This makes the implementation a
 bit simpler, but also allows computing directly on the compressed data
 (which we are exploring in the future).
 
-Blosc utilizes a blocking technique that divides the data in blocks that
+TileDB utilizes a blocking technique that divides the data in blocks that
 are small enough to fit in L1 cache of modern processors and perform
 compression/decompression there. This reduces the activity on the
 memory bus and allows leveraging the SIMD capabilities of the processor, thus
-leading to a performance speed up. Moreover, Blosc
-applies a shuffle filter before compression, which results in
-improved compression ratio. Note that Blosc comes with multiple
-compressors; BloscLZ is the default one, but it works also in combination
-with LZ4, LZ4HC, Snappy, Zlib, and Zstandard. TileDB allows the user to
-specify any of these compressors with Blosc.
+leading to a performance speed up. TileDB also allows you to apply a shuffle
+filter before compression, which can result in improved compression ratio.
 
 Choosing the right compressor for your application is quite challenging,
 as the effectiveness of a compressor heavily depends on the data being
@@ -177,7 +169,7 @@ course to storage consumption. As stated above, the choice of compressor
 is important for performance, but there is always a tradeoff between
 compression ratio and speed, which you need to adjust based on your
 application. Luckily for you, TileDB *parallelizes* internally both
-compression and decompression. However, parallelization takes effect
-when the data tile to be compressed/decompressed is large enough.
-See :ref:`performance/introduction` for more information on
-TileDB performance and how to tune it.
+compression and decompression (and filtering in general).
+However, parallelization takes effect when the data tile to be filtered is large
+enough. See :ref:`performance/introduction` for more information on TileDB
+performance and how to tune it.

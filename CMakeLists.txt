@@ -49,7 +49,12 @@ endif()
 # Set C++11 as required standard for all C++ targets.
 set(CMAKE_CXX_STANDARD 11)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
-set(CMAKE_CXX_EXTENSIONS OFF) # Don't use GNU extensions
+if(CMAKE_SYSTEM_NAME MATCHES "CYGWIN")
+  # Use GNU extensions under Cygwin
+  set(CMAKE_CXX_EXTENSIONS ON)
+else()
+  set(CMAKE_CXX_EXTENSIONS OFF)
+endif()
 
 # Set -fvisibility=hidden (or equivalent) flags by default.
 set(CMAKE_C_VISIBILITY_PRESET hidden)
@@ -74,6 +79,7 @@ option(TILEDB_TBB "Enables use of TBB for parallelization." ON)
 option(TILEDB_TBB_SHARED "If TBB is enabled, builds TBB as a shared library instead of static." OFF)
 option(TILEDB_STATIC "Enables building TileDB as a static library." OFF)
 option(TILEDB_TESTS "If true, enables building the TileDB unit test suite" ON)
+set(TILEDB_INSTALL_LIBDIR "" CACHE STRING "If non-empty, install TileDB library to this directory instead of CMAKE_INSTALL_LIBDIR.")
 
 if (WIN32 AND NOT TILEDB_TBB_SHARED)
   message(WARNING "Static TBB build not supported on Windows. Continuing with TILEDB_TBB_SHARED=ON.")
@@ -128,6 +134,7 @@ set(TILEDB_EP_INSTALL_PREFIX "${TILEDB_EP_BASE}/install")
 if (WIN32)
   # We disable some warnings that are not present in gcc/clang -Wall:
   #   C4101: unreferenced local variable
+  #   C4146: unary minus operator applied to unsigned type
   #   C4244: conversion warning of floating point to integer type.
   #   C4251: C++ export warning
   #   C4456: local variable hiding previous local variable
@@ -135,7 +142,7 @@ if (WIN32)
   #   C4702: unreachable code
   #   C4800: warning implicit cast int to bool
   #   C4996: deprecation warning about e.g. sscanf.
-  add_compile_options(/W4 /wd4101 /wd4244 /wd4251 /wd4456 /wd4457 /wd4702 /wd4800 /wd4996)
+  add_compile_options(/W4 /wd4101 /wd4146 /wd4244 /wd4251 /wd4456 /wd4457 /wd4702 /wd4800 /wd4996)
   # Warnings as errors:
   if (TILEDB_WERROR)
     add_compile_options(/WX)
@@ -166,13 +173,20 @@ else()
   endif()
 
   # Use -Wno-literal-suffix on Linux with C++ sources.
-  if (NOT APPLE)
+  if (NOT CMAKE_CXX_COMPILER_ID MATCHES "Clang")
     add_compile_options($<$<COMPILE_LANGUAGE:CXX>:-Wno-literal-suffix>)
   endif()
 endif()
 
 # Definitions for all targets
 add_definitions(-D_FILE_OFFSET_BITS=64)
+
+# AVX2 flag
+include(CheckAVX2Support)
+CheckAVX2Support()
+if (COMPILER_SUPPORTS_AVX2)
+  add_compile_options(${COMPILER_AVX2_FLAG})
+endif()
 
 ############################################################
 # Enable testing and add subdirectories

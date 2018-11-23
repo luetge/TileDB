@@ -33,6 +33,7 @@
 #ifndef TILEDB_CONSOLIDATOR_H
 #define TILEDB_CONSOLIDATOR_H
 
+#include "tiledb/sm/array/array.h"
 #include "tiledb/sm/misc/status.h"
 #include "tiledb/sm/storage_manager/open_array.h"
 
@@ -67,8 +68,21 @@ class Consolidator {
   /*                API                */
   /* ********************************* */
 
-  /** Consolidates the fragments of the input array. */
-  Status consolidate(const char* array_name);
+  /**
+   * Consolidates the fragments of the input array.
+   *
+   * @param array_name URI of array to consolidate.
+   * @param encryption_type The encryption type of the array
+   * @param encryption_key If the array is encrypted, the private encryption
+   *    key. For unencrypted arrays, pass `nullptr`.
+   * @param key_length The length in bytes of the encryption key.
+   * @return Status
+   */
+  Status consolidate(
+      const char* array_name,
+      EncryptionType encryption_type,
+      const void* encryption_key,
+      uint32_t key_length);
 
  private:
   /* ********************************* */
@@ -126,12 +140,10 @@ class Consolidator {
    * @param query_r This query reads from the fragments to be consolidated.
    * @param query_w This query writes to the new consolidated fragment.
    * @param write_subarray The subarray to write into.
-   * @param open_array_for_reads The opened array for reading the fragments
+   * @param array_for_reads The opened array for reading the fragments
    *     to be consolidated.
-   * @param open_array_for_writes The opened array for writing the
+   * @param array_for_writes The opened array for writing the
    *     consolidated fragments.
-   * @param snapshot The snapshot at which `open_array_for_reads_` got
-   *     opened.
    * @param buffers The buffers to be passed in the queries.
    * @param buffer_sizes The corresponding buffer sizes.
    * @param fragment_num The number of fragments to be retrieved.
@@ -142,17 +154,15 @@ class Consolidator {
       Query** query_r,
       Query** query_w,
       void* write_subarray,
-      OpenArray* open_array_for_reads,
-      OpenArray* open_array_for_writes,
-      uint64_t snapshot,
+      Array* array_for_reads,
+      Array* array_for_writes,
       void** buffers,
       uint64_t* buffer_sizes,
       unsigned int* fragment_num,
       URI* new_fragment_uri);
 
   /** Creates the subarray that should represent the entire array domain. */
-  Status create_subarray(
-      OpenArray* open_array, uint64_t snapshot, void** subarray) const;
+  Status create_subarray(Array* array, void** subarray) const;
 
   /**
    * Deletes the fragment metadata files of the old fragments that

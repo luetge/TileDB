@@ -38,6 +38,7 @@
 #include "tiledb/sm/buffer/buffer.h"
 #include "tiledb/sm/enums/compressor.h"
 #include "tiledb/sm/enums/datatype.h"
+#include "tiledb/sm/filter/filter_pipeline.h"
 #include "tiledb/sm/misc/status.h"
 
 namespace tiledb {
@@ -104,6 +105,9 @@ class Attribute {
   /** Dumps the attribute contents in ASCII form in the selected output. */
   void dump(FILE* out) const;
 
+  /** Returns the filter pipeline of this attribute. */
+  const FilterPipeline* filters() const;
+
   /** Returns the attribute name. */
   const std::string& name() const;
 
@@ -133,6 +137,9 @@ class Attribute {
   /** Sets the attribute compression level. */
   void set_compression_level(int compression_level);
 
+  /** Sets the filter pipeline for this attribute. */
+  Status set_filter_pipeline(const FilterPipeline* pipeline);
+
   /** Sets the attribute name. */
   void set_name(const std::string& name);
 
@@ -153,11 +160,8 @@ class Attribute {
   /** The attribute number of values per cell. */
   unsigned int cell_val_num_;
 
-  /** The attribute compressor. */
-  Compressor compressor_;
-
-  /** The attribute compression level. */
-  int compression_level_;
+  /** The attribute filter pipeline. */
+  FilterPipeline filters_;
 
   /** The attribute name. */
   std::string name_;

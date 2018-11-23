@@ -1,5 +1,5 @@
 /**
- * @file   unit-capi-consolidation.cc
+ * @file   unit-capi-incomplete.cc
  *
  * @section LICENSE
  *
@@ -31,6 +31,7 @@
  */
 
 #include "catch.hpp"
+#include "test/src/helpers.h"
 #include "tiledb/sm/c_api/tiledb.h"
 
 #include <cstring>
@@ -109,7 +110,7 @@ void IncompleteFx::create_dense_array() {
   tiledb_attribute_t* a1;
   rc = tiledb_attribute_alloc(ctx_, "a1", TILEDB_INT32, &a1);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a1, TILEDB_BLOSC_LZ, -1);
+  rc = set_attribute_compression_filter(ctx_, a1, TILEDB_FILTER_LZ4, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a1, 1);
   CHECK(rc == TILEDB_OK);
@@ -117,7 +118,7 @@ void IncompleteFx::create_dense_array() {
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_alloc(ctx_, "a2", TILEDB_CHAR, &a2);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a2, TILEDB_GZIP, -1);
+  rc = set_attribute_compression_filter(ctx_, a2, TILEDB_FILTER_GZIP, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a2, TILEDB_VAR_NUM);
   CHECK(rc == TILEDB_OK);
@@ -125,7 +126,7 @@ void IncompleteFx::create_dense_array() {
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_alloc(ctx_, "a3", TILEDB_FLOAT32, &a3);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a3, TILEDB_ZSTD, -1);
+  rc = set_attribute_compression_filter(ctx_, a3, TILEDB_FILTER_ZSTD, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a3, 2);
   CHECK(rc == TILEDB_OK);
@@ -191,21 +192,21 @@ void IncompleteFx::create_sparse_array() {
   tiledb_attribute_t* a1;
   rc = tiledb_attribute_alloc(ctx_, "a1", TILEDB_INT32, &a1);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a1, TILEDB_BLOSC_LZ, -1);
+  rc = set_attribute_compression_filter(ctx_, a1, TILEDB_FILTER_LZ4, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a1, 1);
   CHECK(rc == TILEDB_OK);
   tiledb_attribute_t* a2;
   rc = tiledb_attribute_alloc(ctx_, "a2", TILEDB_CHAR, &a2);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a2, TILEDB_GZIP, -1);
+  rc = set_attribute_compression_filter(ctx_, a2, TILEDB_FILTER_GZIP, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a2, TILEDB_VAR_NUM);
   CHECK(rc == TILEDB_OK);
   tiledb_attribute_t* a3;
   rc = tiledb_attribute_alloc(ctx_, "a3", TILEDB_FLOAT32, &a3);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a3, TILEDB_ZSTD, -1);
+  rc = set_attribute_compression_filter(ctx_, a3, TILEDB_FILTER_ZSTD, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a3, 2);
   CHECK(rc == TILEDB_OK);
@@ -624,7 +625,8 @@ void IncompleteFx::check_dense_shrink_buffer_size() {
   CHECK(status == TILEDB_INCOMPLETE);
 
   // Check new buffer contents
-  CHECK(buffer_sizes[0] == 0);
+  CHECK(buffer_sizes[0] == 4);
+  CHECK(buffer_a1[0] == 2);
 
   // Free/finalize query
   rc = tiledb_query_finalize(ctx_, query);
@@ -686,6 +688,9 @@ void IncompleteFx::check_dense_unsplittable_overflow() {
   rc = tiledb_query_get_status(ctx_, query, &status);
   CHECK(rc == TILEDB_OK);
   CHECK(status == TILEDB_INCOMPLETE);
+
+  CHECK(buffer_sizes[0] == 0);
+  CHECK(buffer_sizes[1] == 0);
 
   // Finalize query
   rc = tiledb_query_finalize(ctx_, query);

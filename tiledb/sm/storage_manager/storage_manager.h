@@ -43,12 +43,10 @@
 #include <string>
 #include <thread>
 
-#ifdef HAVE_TBB
-#include <tbb/task_scheduler_init.h>
-#endif
-
 #include "tiledb/sm/array_schema/array_schema.h"
 #include "tiledb/sm/cache/lru_cache.h"
+#include "tiledb/sm/encryption/encryption.h"
+#include "tiledb/sm/encryption/encryption_key_validation.h"
 #include "tiledb/sm/enums/object_type.h"
 #include "tiledb/sm/enums/walk_order.h"
 #include "tiledb/sm/filesystem/vfs.h"
@@ -62,6 +60,9 @@
 
 namespace tiledb {
 namespace sm {
+
+class Array;
+class Consolidator;
 
 /** The storage manager that manages pretty much everything in TileDB. */
 class StorageManager {
@@ -121,13 +122,12 @@ class StorageManager {
    *
    * @param array_uri The array URI.
    * @param query_type The type of queries the array is opened for.
+   * @param encryption_key The encryption key to use.
    * @param open_array The open array object to be retrieved.
-   * @param snapshot A snapshot to be retrieved. This is a token needed to
-   *     retrieve the appropriate fragment metadata, so that the new
-   *     fragment metadata potentially loaded to the open array object
-   *     by another invocation of this function can be ignored (to comply
-   *     with the TileDB consistency model). This is used only when
-   *     opening array for reading.
+   * @param timestamp The timestamp at which the array will be opened.
+   *     In TileDB, timestamps are in ms elapsed since
+   *     1970-01-01 00:00:00 +0000 (UTC). This timestamp is meaningful only
+   *     when opening the array for reading.
    * @return Status
    *
    * @note The same array can be opened for both reads and writes. However,
@@ -137,29 +137,36 @@ class StorageManager {
   Status array_open(
       const URI& array_uri,
       QueryType query_type,
+      const EncryptionKey& encryption_key,
       OpenArray** open_array,
-      uint64_t* snapshot);
+      uint64_t timestamp);
 
   /**
    * Reopens an already open array, loading the fragment metadata of any new
-   * fragments and acquiring a new snapshot identifier.
+   * fragments and acquiring a new timestamp.
    * This is applicable only to arrays opened for reads.
-   * When the new snapshot snapshot is used in future queries, the queries
-   * will see the fragments in the array created at or before this snapshot.
+   * When the new timestamp is used in future queries, the queries
+   * will see the fragments in the array created at or before this timestamp.
    *
    * @param open_array The open array to be reopened.
-   * @param snapshot A new snapshot identifier retrieved.
+   * @param encryption_key The encryption key to use.
+   * @param timestamp The timestamp at which the array will be opened.
+   *     In TileDB, timestamps are in ms elapsed since
+   *     1970-01-01 00:00:00 +0000 (UTC).
    * @return Status
    */
-  Status array_reopen(OpenArray* open_array, uint64_t* snapshot);
+  Status array_reopen(
+      OpenArray* open_array,
+      const EncryptionKey& encryption_key,
+      uint64_t timestamp);
 
   /**
    * Computes an upper bound on the buffer sizes required for a read
    * query, for all array attributes plus coordinates.
    *
    * @param open_array The opened array.
-   * @param snapshot The snapshot that indicates which fragment metadata should
-   *     be loaded from `open_array`.
+   * @param timestamp The timestamp that indicates which fragment metadata
+   * should be loaded from `open_array`.
    * @param subarray The subarray to focus on. Note that it must have the same
    *     underlying type as the array domain.
    * @param buffer_sizes The buffer sizes to be retrieved. This is a map from
@@ -171,7 +178,7 @@ class StorageManager {
    */
   Status array_compute_max_buffer_sizes(
       OpenArray* open_array,
-      uint64_t snapshot,
+      uint64_t timestamp,
       const void* subarray,
       std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>*
           max_buffer_sizes_);
@@ -181,8 +188,8 @@ class StorageManager {
    * query, for a given subarray and set of attributes.
    *
    * @param open_array The opened array.
-   * @param snapshot The snapshot that indicates which fragment metadata should
-   *     be loaded from `open_array`.
+   * @param timestamp The timestamp that indicates which fragment metadata
+   * should be loaded from `open_array`.
    * @param subarray The subarray to focus on. Note that it must have the same
    *     underlying type as the array domain.
    * @param attributes The attributes to focus on.
@@ -195,11 +202,11 @@ class StorageManager {
    */
   Status array_compute_max_buffer_sizes(
       OpenArray* open_array,
-      uint64_t snapshot,
+      uint64_t timestamp,
       const void* subarray,
       const std::vector<std::string>& attributes,
       std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>*
-          max_buffer_sizes_);
+          max_buffer_sizes);
 
   /**
    * Computes an upper bound on the buffer sizes required for a read
@@ -246,33 +253,42 @@ class StorageManager {
    * Consolidates the fragments of an array into a single one.
    *
    * @param array_name The name of the array to be consolidated.
+   * @param encryption_type The encryption type of the array
+   * @param encryption_key If the array is encrypted, the private encryption
+   *    key. For unencrypted arrays, pass `nullptr`.
+   * @param key_length The length in bytes of the encryption key.
    * @return Status
    */
-  Status array_consolidate(const char* array_name);
+  Status array_consolidate(
+      const char* array_name,
+      EncryptionType encryption_type,
+      const void* encryption_key,
+      uint32_t key_length);
 
   /**
    * Creates a TileDB array storing its schema.
    *
    * @param array_uri The URI of the array to be created.
    * @param array_schema The array schema.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status array_create(const URI& array_uri, ArraySchema* array_schema);
+  Status array_create(
+      const URI& array_uri,
+      ArraySchema* array_schema,
+      const EncryptionKey& encryption_key);
 
   /**
    * Retrieves the non-empty domain from an array. This is the union of the
    * non-empty domains of the array fragments.
    *
-   * @param open_array An open array object (must be already open).
-   * @param snapshot The snapshot that indicates which fragment metadata should
-   *     be loaded from `open_array`.
+   * @param array An open array object (must be already open).
    * @param domain The domain to be retrieved.
    * @param is_empty `ture` if the non-empty domain is empty (the array
    *     is empty).
    * @return Status
    */
-  Status array_get_non_empty_domain(
-      OpenArray* open_array, uint64_t snapshot, void* domain, bool* is_empty);
+  Status array_get_non_empty_domain(Array* array, void* domain, bool* is_empty);
 
   /**
    * Exclusively locks an array preventing it from being opened in
@@ -398,20 +414,31 @@ class StorageManager {
    *
    * @param array_uri The URI path of the array.
    * @param object_type This is either ARRAY or KEY_VALUE.
+   * @param encryption_key The encryption key to use.
    * @param array_schema The array schema to be retrieved.
+   * @param in_cache Set to true if the schema was cached.
    * @return Status
    */
   Status load_array_schema(
-      const URI& array_uri, ObjectType object_type, ArraySchema** array_schema);
+      const URI& array_uri,
+      ObjectType object_type,
+      const EncryptionKey& encryption_key,
+      ArraySchema** array_schema,
+      bool* in_cache);
 
   /**
    * Loads the fragment metadata of an array from persistent storage into
    * memory.
    *
    * @param metadata The fragment metadata to be loaded.
+   * @param encryption_key The encryption key to use.
+   * @param in_cache Set to true if the metadata was retrieved from the cache
    * @return Status
    */
-  Status load_fragment_metadata(FragmentMetadata* metadata);
+  Status load_fragment_metadata(
+      FragmentMetadata* metadata,
+      const EncryptionKey& encryption_key,
+      bool* in_cache);
 
   /** Removes a TileDB object (group, array, kv). */
   Status object_remove(const char* path) const;
@@ -504,30 +531,6 @@ class StorageManager {
    */
   Status object_type(const URI& uri, ObjectType* type) const;
 
-  /**
-   * Creates a query. The query type is inferred from the input array.
-   *
-   * @param query The query to initialize.
-   * @param open_array An opened array.
-   * @param snapshot This indicates which fragment metadata to retrieve
-   *     from the open array and assigned to the query. This snapshot
-   *     should be the value retrieved upon opening the array when it
-   *     was intended to be assigned to the query. This safeguards against
-   *     new fragment metadata are loaded into `open_array` after `snapshot`,
-   *     which however must be ignored by the query being created.
-   * @param fragment_uri This is applicable only to write queries. This is
-   *     to indicate that the new fragment created by a write will have
-   *     a specific URI. This is useful mainly in consolidation, where
-   *     the consolidated fragment URI must be explicitly created by
-   *     the consolidator.
-   * @return Status
-   */
-  Status query_create(
-      Query** query,
-      OpenArray* open_array,
-      uint64_t snapshot,
-      URI fragment_uri = URI(""));
-
   /** Submits a query for (sync) execution. */
   Status query_submit(Query* query);
 
@@ -535,12 +538,9 @@ class StorageManager {
    * Submits a query for async execution.
    *
    * @param query The query to submit.
-   * @param callback The fuction that will be called upon query completion.
-   * @param callback_data The data to be provided to the callback function.
    * @return Status
    */
-  Status query_submit_async(
-      Query* query, std::function<void(void*)> callback, void* callback_data);
+  Status query_submit_async(Query* query);
 
   /**
    * Reads from the cache into the input buffer. `uri` and `offset` collectively
@@ -565,6 +565,9 @@ class StorageManager {
       uint64_t nbytes,
       bool* in_cache) const;
 
+  /** Returns the Reader thread pool. */
+  ThreadPool* reader_thread_pool() const;
+
   /**
    * Reads from a file into the input buffer.
    *
@@ -582,23 +585,30 @@ class StorageManager {
    * Stores an array schema into persistent storage.
    *
    * @param array_schema The array metadata to be stored.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status store_array_schema(ArraySchema* array_schema);
+  Status store_array_schema(
+      ArraySchema* array_schema, const EncryptionKey& encryption_key);
 
   /**
    * Stores the fragment metadata into persistent storage.
    *
    * @param metadata The fragment metadata to be stored.
+   * @param encryption_key The encryption key to use.
    * @return Status
    */
-  Status store_fragment_metadata(FragmentMetadata* metadata);
+  Status store_fragment_metadata(
+      FragmentMetadata* metadata, const EncryptionKey& encryption_key);
 
   /** Closes a file, flushing its contents to persistent storage. */
   Status close_file(const URI& uri);
 
   /** Syncs a file or directory, flushing its contents to persistent storage. */
   Status sync(const URI& uri);
+
+  /** Returns the Writer thread pool. */
+  ThreadPool* writer_thread_pool() const;
 
   /** Returns the virtual filesystem object. */
   VFS* vfs() const;
@@ -627,6 +637,33 @@ class StorageManager {
   Status write(const URI& uri, Buffer* buffer) const;
 
  private:
+  /* ********************************* */
+  /*        PRIVATE DATATYPES          */
+  /* ********************************* */
+
+  /**
+   * Helper RAII struct that increments 'queries_in_progress' in the constructor
+   * and decrements in the destructor, on the given StorageManager instance.
+   *
+   * This ensures that the counter is decremented even in the case of
+   * exceptions.
+   */
+  struct QueryInProgress {
+    /** The StorageManager instance. */
+    StorageManager* sm;
+
+    /** Constructor. Calls increment_in_progress() on given StorageManager. */
+    QueryInProgress(StorageManager* sm)
+        : sm(sm) {
+      sm->increment_in_progress();
+    }
+
+    /** Destructor. Calls decrement_in_progress() on given StorageManager. */
+    ~QueryInProgress() {
+      sm->decrement_in_progress();
+    }
+  };
+
   /* ********************************* */
   /*        PRIVATE ATTRIBUTES         */
   /* ********************************* */
@@ -668,11 +705,25 @@ class StorageManager {
   /** Mutex for managing OpenArray objects for writes. */
   std::mutex open_array_for_writes_mtx_;
 
+  /** Mutex protecting open_arrays_encryption_keys_. */
+  std::mutex open_arrays_encryption_keys_mtx_;
+
   /** Stores the currently open arrays for reads. */
   std::map<std::string, OpenArray*> open_arrays_for_reads_;
 
   /** Stores the currently open arrays for writes. */
   std::map<std::string, OpenArray*> open_arrays_for_writes_;
+
+  /**
+   * Map of array URI -> encryption key validation instance for arrays that have
+   * been opened with an encryption key. This does not store the actual keys.
+   *
+   * Note: there is no difference when opening arrays for reads or writes. This
+   * map is insert-only (items not removed when arrays are closed) because
+   * the encryption key does not (and should not) ever change.
+   */
+  std::map<std::string, std::unique_ptr<EncryptionKeyValidation>>
+      open_arrays_encryption_keys_;
 
   /** Count of the number of queries currently in progress. */
   uint64_t queries_in_progress_;
@@ -686,10 +737,11 @@ class StorageManager {
   /** The storage manager's thread pool for async queries. */
   std::unique_ptr<ThreadPool> async_thread_pool_;
 
-#ifdef HAVE_TBB
-  /** The TBB scheduler, used for controlling the number of TBB threads. */
-  std::unique_ptr<tbb::task_scheduler_init> tbb_scheduler_;
-#endif
+  /** The storage manager's thread pool for Readers. */
+  std::unique_ptr<ThreadPool> reader_thread_pool_;
+
+  /** The storage manager's thread pool for Writers. */
+  std::unique_ptr<ThreadPool> writer_thread_pool_;
 
   /** A tile cache. */
   LRUCache* tile_cache_;
@@ -774,19 +826,39 @@ class StorageManager {
    * Opens an array for reads.
    *
    * @param array_uri The array URI.
+   * @param encryption_key The encryption key to use.
    * @param open_array The open array object to be created
-   * @param snapshot A snapshot to be retrieved. This is a token needed to
-   *     retrieve the appropriate fragment metadata, so that the new
-   *     fragment metadata potentially loaded to the open array object
-   *     by another invocation of this function can be ignored (to comply
-   *     with the TileDB consistency model).
+   * @param timestamp The timestamp at which the array will be opened.
+   *     In TileDB, timestamps are in ms elapsed since
+   *     1970-01-01 00:00:00 +0000 (UTC).
    * @return Status
    */
   Status array_open_for_reads(
-      const URI& array_uri, OpenArray** open_array, uint64_t* snapshot);
+      const URI& array_uri,
+      const EncryptionKey& encryption_key,
+      OpenArray** open_array,
+      uint64_t timestamp);
 
   /** Opens an array for writes. */
-  Status array_open_for_writes(const URI& array_uri, OpenArray** open_array);
+  Status array_open_for_writes(
+      const URI& array_uri,
+      const EncryptionKey& encryption_key,
+      OpenArray** open_array);
+
+  /**
+   * Checks that the given encryption key is valid for the given array. Returns
+   * an error if the key is invalid.
+   *
+   * @param schema Array schema
+   * @param encryption_key The encryption key to check.
+   * @param was_cache_hit If true, also returns an error if the encryption key
+   *    was not used before (sanity check).
+   * @return Status
+   */
+  Status check_array_encryption_key(
+      const ArraySchema* schema,
+      const EncryptionKey& encryption_key,
+      bool was_cache_hit);
 
   /** Decrement the count of in-progress queries. */
   void decrement_in_progress();
@@ -799,38 +871,49 @@ class StorageManager {
   void increment_in_progress();
 
   /**
-   * Configures the TBB runtime. If TBB is not enabled, does nothing.
-   *
-   * @param config The configuration parameters
-   * @return Status
-   */
-  Status init_tbb(Config::SMParams& config);
-
-  /**
    * Loads the array schema into an open array.
    *
    * @param array_uri The array URI.
    * @param object_type This is either ARRAY or KEY_VALUE.
    * @param open_array The open array object.
+   * @param encryption_key The encryption key to use.
+   * @param in_cache Set to true if the schema was retrieved from the cache.
    * @return Status
    */
   Status load_array_schema(
-      const URI& array_uri, ObjectType object_type, OpenArray* open_array);
+      const URI& array_uri,
+      ObjectType object_type,
+      OpenArray* open_array,
+      const EncryptionKey& encryption_key,
+      bool* in_cache);
 
   /**
    * Retrieves the fragment metadata of an open array that are not already
    * loaded.
    *
    * @param open_array The open array object.
+   * @param encryption_key The encryption key to use.
+   * @param in_cache Set to true if any metdata was retrieved from the cache
+   * @param timestamp The timestamp at which the array will be opened.
+   *     In TileDB, timestamps are in ms elapsed since
+   *     1970-01-01 00:00:00 +0000 (UTC).
    * @return Status
    */
-  Status load_fragment_metadata(OpenArray* open_array);
+  Status load_fragment_metadata(
+      OpenArray* open_array,
+      const EncryptionKey& encryption_key,
+      bool* in_cache,
+      uint64_t timestamp);
 
   /**
-   * Sorts the input fragment URIs in ascending timestamp order, breaking
-   * ties using the process id.
+   * Sorts the fragment URIs (in the first input) in ascending timestamp
+   * order, breaking ties using the process id. The sorted fragment
+   * URIs are stored in the second input, including the fragment
+   * timestamps.
    */
-  void sort_fragment_uris(std::vector<URI>* fragment_uris) const;
+  void sort_fragment_uris(
+      const std::vector<URI>& fragment_uris,
+      std::vector<std::pair<uint64_t, URI>>* sorted_fragment_uris) const;
 
   /** Block until there are zero in-progress queries. */
   void wait_for_zero_in_progress();

@@ -39,8 +39,8 @@
 namespace tiledb {
 namespace sm {
 
-enum class Datatype : char;
-enum class Compressor : char;
+enum class Datatype : uint8_t;
+enum class Compressor : uint8_t;
 
 namespace constants {
 
@@ -49,6 +49,12 @@ namespace constants {
  * writes.
  */
 extern const bool check_coord_dups;
+
+/**
+ * If `true`, this will check for out-of-bound coordinates upon sparse
+ * writes.
+ */
+extern const bool check_coord_oob;
 
 /** If `true`, this will deduplicate coordinates upon sparse writes. */
 extern const bool dedup_coords;
@@ -183,13 +189,13 @@ extern const uint64_t vfs_min_parallel_size;
 extern const uint64_t vfs_file_max_parallel_ops;
 
 /** The maximum name length. */
-extern const unsigned uri_max_len;
+extern const uint32_t uri_max_len;
 
 /** The maximum file path length (depending on platform). */
-extern const unsigned path_max_len;
+extern const uint32_t path_max_len;
 
 /** Special value indicating a variable number of elements. */
-extern const unsigned int var_num;
+extern const uint32_t var_num;
 
 /** String describing no compression. */
 extern const std::string no_compression_str;
@@ -206,6 +212,12 @@ extern const bool enable_signal_handlers;
 /** The number of threads allocated per StorageManager for async queries. */
 extern const uint64_t num_async_threads;
 
+/** The number of threads allocated per StorageManager for read operations. */
+extern const uint64_t num_reader_threads;
+
+/** The number of threads allocated per StorageManager for write operations. */
+extern const uint64_t num_writer_threads;
+
 /** The number of threads allocated for TBB. */
 extern const int num_tbb_threads;
 
@@ -221,6 +233,30 @@ extern const std::string query_type_read_str;
 /** TILEDB_WRITE Query String **/
 extern const std::string query_type_write_str;
 
+/** TILEDB_FAILED Query String **/
+extern const std::string query_status_failed_str;
+
+/** TILEDB_COMPLETE Query String **/
+extern const std::string query_status_completed_str;
+
+/** TILEDB_INPROGRESS Query String **/
+extern const std::string query_status_inprogress_str;
+
+/** TILEDB_INCOMPLETE Query String **/
+extern const std::string query_status_incomplete_str;
+
+/** TILEDB_UNINITIALIZED Query String **/
+extern const std::string query_status_uninitialized_str;
+
+/** TILEDB_COMPRESSION Filter type string */
+extern const std::string filter_type_compression_str;
+
+/** String describing no encryption. */
+extern const std::string no_encryption_str;
+
+/** String describing AES_256_GCM. */
+extern const std::string aes_256_gcm_str;
+
 /** String describing GZIP. */
 extern const std::string gzip_str;
 
@@ -229,24 +265,6 @@ extern const std::string zstd_str;
 
 /** String describing LZ4. */
 extern const std::string lz4_str;
-
-/** String describing BLOSC. */
-extern const std::string blosc_lz_str;
-
-/** String describing BLOSC_LZ4. */
-extern const std::string blosc_lz4_str;
-
-/** String describing BLOSC_LZ4HC. */
-extern const std::string blosc_lz4hc_str;
-
-/** String describing BLOSC_SNAPPY. */
-extern const std::string blosc_snappy_str;
-
-/** String describing BLOSC_ZLIB. */
-extern const std::string blosc_zlib_str;
-
-/** String describing BLOSC_ZSTD. */
-extern const std::string blosc_zstd_str;
 
 /** String describing RLE. */
 extern const std::string rle_str;
@@ -332,8 +350,11 @@ extern const std::string unordered_str;
 /** The string representation of null. */
 extern const std::string null_str;
 
-/** The version in format { major, minor, revision }. */
-extern const int version[3];
+/** The TileDB library version in format { major, minor, revision }. */
+extern const int32_t library_version[3];
+
+/** The TileDB serialization format version number. */
+extern const uint32_t format_version;
 
 /** The maximum size of a tile chunk (unit of compression) in bytes. */
 extern const uint64_t max_tile_chunk_size;
@@ -350,17 +371,8 @@ extern const std::string key_attr_name;
 /** The key attribute type. */
 extern Datatype key_attr_type;
 
-/** The key type attribute name. */
-extern const std::string key_type_attr_name;
-
-/** The key type attribute type. */
-extern Datatype key_type_attr_type;
-
 /** The key attribute compressor. */
 extern Compressor key_attr_compressor;
-
-/** The key type attribute compressor. */
-extern Compressor key_type_attr_compressor;
 
 /**
  * The name of the first key dimension (recall that a key in a
@@ -447,6 +459,9 @@ extern const std::string special_name_prefix;
 
 /** Number of milliseconds between watchdog thread wakeups. */
 extern const unsigned watchdog_thread_sleep_ms;
+
+/** Returns the empty fill value based on the input datatype. */
+const void* fill_value(Datatype type);
 
 }  // namespace constants
 

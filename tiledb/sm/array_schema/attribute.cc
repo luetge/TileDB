@@ -32,6 +32,7 @@
 
 #include "tiledb/sm/array_schema/attribute.h"
 #include "tiledb/sm/buffer/const_buffer.h"
+#include "tiledb/sm/filter/compression_filter.h"
 #include "tiledb/sm/misc/logger.h"
 #include "tiledb/sm/misc/utils.h"
 
@@ -44,14 +45,16 @@ namespace sm {
 /*     CONSTRUCTORS & DESTRUCTORS    */
 /* ********************************* */
 
-Attribute::Attribute() = default;
+Attribute::Attribute() {
+  name_ = "";
+  type_ = Datatype::CHAR;
+  cell_val_num_ = 1;
+}
 
 Attribute::Attribute(const std::string& name, Datatype type) {
   name_ = name;
   type_ = type;
   cell_val_num_ = (type == Datatype::ANY) ? constants::var_num : 1;
-  compressor_ = Compressor::NO_COMPRESSION;
-  compression_level_ = -1;
 }
 
 Attribute::Attribute(const Attribute* attr) {
@@ -59,8 +62,7 @@ Attribute::Attribute(const Attribute* attr) {
   name_ = attr->name();
   type_ = attr->type();
   cell_val_num_ = attr->cell_val_num();
-  compressor_ = attr->compressor();
-  compression_level_ = attr->compression_level();
+  filters_ = attr->filters_;
 }
 
 Attribute::~Attribute() = default;
@@ -81,40 +83,39 @@ unsigned int Attribute::cell_val_num() const {
 }
 
 Compressor Attribute::compressor() const {
-  return compressor_;
+  auto compressor = filters_.get_filter<CompressionFilter>();
+  return compressor == nullptr ? Compressor::NO_COMPRESSION :
+                                 compressor->compressor();
 }
 
 int Attribute::compression_level() const {
-  return compression_level_;
+  auto compressor = filters_.get_filter<CompressionFilter>();
+  return compressor == nullptr ? -1 : compressor->compression_level();
 }
 
 // ===== FORMAT =====
-// attribute_name_size (unsigned int)
+// attribute_name_size (uint32_t)
 // attribute_name (string)
-// type (char)
-// compressor (char)
-// compression_level (int)
-// cell_val_num (unsigned int)
+// type (uint8_t)
+// cell_val_num (uint32_t)
+// filter_pipeline (see FilterPipeline::serialize)
 Status Attribute::deserialize(ConstBuffer* buff) {
   // Load attribute name
-  unsigned int attribute_name_size;
-  RETURN_NOT_OK(buff->read(&attribute_name_size, sizeof(unsigned int)));
+  uint32_t attribute_name_size;
+  RETURN_NOT_OK(buff->read(&attribute_name_size, sizeof(uint32_t)));
   name_.resize(attribute_name_size);
   RETURN_NOT_OK(buff->read(&name_[0], attribute_name_size));
 
   // Load type
-  char type;
-  RETURN_NOT_OK(buff->read(&type, sizeof(char)));
+  uint8_t type;
+  RETURN_NOT_OK(buff->read(&type, sizeof(uint8_t)));
   type_ = (Datatype)type;
 
-  // Load compressor
-  char compressor;
-  RETURN_NOT_OK(buff->read(&compressor, sizeof(char)));
-  compressor_ = (Compressor)compressor;
-  RETURN_NOT_OK(buff->read(&compression_level_, sizeof(int)));
-
   // Load cell_val_num_
-  RETURN_NOT_OK(buff->read(&cell_val_num_, sizeof(unsigned int)));
+  RETURN_NOT_OK(buff->read(&cell_val_num_, sizeof(uint32_t)));
+
+  // Load filter pipeline
+  RETURN_NOT_OK(filters_.deserialize(buff));
 
   return Status::Ok();
 }
@@ -124,13 +125,17 @@ void Attribute::dump(FILE* out) const {
   fprintf(out, "### Attribute ###\n");
   fprintf(out, "- Name: %s\n", is_anonymous() ? "<anonymous>" : name_.c_str());
   fprintf(out, "- Type: %s\n", datatype_str(type_).c_str());
-  fprintf(out, "- Compressor: %s\n", compressor_str(compressor_).c_str());
-  fprintf(out, "- Compression level: %d\n", compression_level_);
+  fprintf(out, "- Compressor: %s\n", compressor_str(compressor()).c_str());
+  fprintf(out, "- Compression level: %d\n", compression_level());
 
   if (!var_size())
     fprintf(out, "- Cell val num: %u\n", cell_val_num_);
   else
     fprintf(out, "- Cell val num: var\n");
+}
+
+const FilterPipeline* Attribute::filters() const {
+  return &filters_;
 }
 
 const std::string& Attribute::name() const {
@@ -139,33 +144,30 @@ const std::string& Attribute::name() const {
 
 bool Attribute::is_anonymous() const {
   return name_.empty() ||
-         utils::starts_with(name_, constants::default_attr_name);
+         utils::parse::starts_with(name_, constants::default_attr_name);
 }
 
 // ===== FORMAT =====
-// attribute_name_size (unsigned int)
+// attribute_name_size (uint32_t)
 // attribute_name (string)
-// type (char)
-// compressor (char)
-// compression_level (int)
-// cell_val_num (unsigned int)
+// type (uint8_t)
+// cell_val_num (uint32_t)
+// filter_pipeline (see FilterPipeline::serialize)
 Status Attribute::serialize(Buffer* buff) {
   // Write attribute name
-  auto attribute_name_size = (unsigned int)name_.size();
-  RETURN_NOT_OK(buff->write(&attribute_name_size, sizeof(unsigned int)));
+  auto attribute_name_size = (uint32_t)name_.size();
+  RETURN_NOT_OK(buff->write(&attribute_name_size, sizeof(uint32_t)));
   RETURN_NOT_OK(buff->write(name_.c_str(), attribute_name_size));
 
   // Write type
-  auto type = (char)type_;
-  RETURN_NOT_OK(buff->write(&type, sizeof(char)));
-
-  // Write compressor
-  auto compressor = (char)compressor_;
-  RETURN_NOT_OK(buff->write(&compressor, sizeof(char)));
-  RETURN_NOT_OK(buff->write(&compression_level_, sizeof(int)));
+  auto type = (uint8_t)type_;
+  RETURN_NOT_OK(buff->write(&type, sizeof(uint8_t)));
 
   // Write cell_val_num_
-  RETURN_NOT_OK(buff->write(&cell_val_num_, sizeof(unsigned int)));
+  RETURN_NOT_OK(buff->write(&cell_val_num_, sizeof(uint32_t)));
+
+  // Write filter pipeline
+  RETURN_NOT_OK(filters_.serialize(buff));
 
   return Status::Ok();
 }
@@ -182,11 +184,25 @@ Status Attribute::set_cell_val_num(unsigned int cell_val_num) {
 }
 
 void Attribute::set_compressor(Compressor compressor) {
-  compressor_ = compressor;
+  auto filter = filters_.get_filter<CompressionFilter>();
+  if (filter == nullptr)
+    filters_.add_filter(CompressionFilter(compressor, -1));
+  else
+    filter->set_compressor(compressor);
 }
 
 void Attribute::set_compression_level(int compression_level) {
-  compression_level_ = compression_level;
+  auto filter = filters_.get_filter<CompressionFilter>();
+  if (filter == nullptr)
+    filters_.add_filter(
+        CompressionFilter(Compressor::NO_COMPRESSION, compression_level));
+  else
+    filter->set_compression_level(compression_level);
+}
+
+Status Attribute::set_filter_pipeline(const FilterPipeline* pipeline) {
+  filters_ = *pipeline;
+  return Status::Ok();
 }
 
 void Attribute::set_name(const std::string& name) {

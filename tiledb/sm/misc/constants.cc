@@ -63,6 +63,12 @@ namespace constants {
  */
 const bool check_coord_dups = true;
 
+/**
+ * If `true`, this will check for out-of-bound coordinates upon sparse
+ * writes.
+ */
+const bool check_coord_oob = true;
+
 /** If `true`, this will deduplicate coordinates upon sparse writes. */
 const bool dedup_coords = false;
 
@@ -196,15 +202,15 @@ const uint64_t vfs_min_parallel_size = 10 * 1024 * 1024;
 const uint64_t vfs_file_max_parallel_ops = vfs_num_threads;
 
 /** The maximum name length. */
-const unsigned uri_max_len = 256;
+const uint32_t uri_max_len = 256;
 
 /** The maximum file path length (depending on platform). */
 #ifndef _WIN32
-const unsigned path_max_len = PATH_MAX;
+const uint32_t path_max_len = PATH_MAX;
 #endif
 
 /** Special value indicating a variable number of elements. */
-const unsigned int var_num = std::numeric_limits<unsigned int>::max();
+const uint32_t var_num = std::numeric_limits<unsigned int>::max();
 
 /** String describing no compression. */
 const std::string no_compression_str = "NO_COMPRESSION";
@@ -221,11 +227,17 @@ const bool enable_signal_handlers = true;
 /** The number of threads allocated per StorageManager for async queries. */
 const uint64_t num_async_threads = 1;
 
+/** The number of threads allocated per StorageManager for async queries. */
+const uint64_t num_reader_threads = 1;
+
+/** The number of threads allocated per StorageManager for async queries. */
+const uint64_t num_writer_threads = 1;
+
 /** The number of threads allocated for TBB. */
 #ifdef HAVE_TBB
 const int num_tbb_threads = tbb::task_scheduler_init::automatic;
 #else
-const int num_tbb_threads = std::thread::hardware_concurrency();
+const int num_tbb_threads = -1;
 #endif
 
 /** The tile cache size. */
@@ -239,6 +251,29 @@ const std::string query_type_read_str = "READ";
 
 /** TILEDB_WRITE Query String **/
 const std::string query_type_write_str = "WRITE";
+/** TILEDB_FAILED Query String **/
+const std::string query_status_failed_str = "FAILED";
+
+/** TILEDB_COMPLETED Query String **/
+const std::string query_status_completed_str = "COMPLETED";
+
+/** TILEDB_INPROGRESS Query String **/
+const std::string query_status_inprogress_str = "INPROGRESS";
+
+/** TILEDB_INCOMPLETE Query String **/
+const std::string query_status_incomplete_str = "INCOMPLETE";
+
+/** TILEDB_UNINITIALIZED Query String **/
+const std::string query_status_uninitialized_str = "UNINITIALIZED";
+
+/** TILEDB_COMPRESSION Filter type string */
+const std::string filter_type_compression_str = "COMPRESSION";
+
+/** String describing no encryption. */
+const std::string no_encryption_str = "NO_ENCRYPTION";
+
+/** String describing AES_256_GCM. */
+const std::string aes_256_gcm_str = "AES_256_GCM";
 
 /** String describing GZIP. */
 const std::string gzip_str = "GZIP";
@@ -248,24 +283,6 @@ const std::string zstd_str = "ZSTD";
 
 /** String describing LZ4. */
 const std::string lz4_str = "LZ4";
-
-/** String describing BLOSC. */
-const std::string blosc_lz_str = "BLOSC_LZ";
-
-/** String describing BLOSC_LZ4. */
-const std::string blosc_lz4_str = "BLOSC_LZ4";
-
-/** String describing BLOSC_LZ4HC. */
-const std::string blosc_lz4hc_str = "BLOSC_LZ4HC";
-
-/** String describing BLOSC_SNAPPY. */
-const std::string blosc_snappy_str = "BLOSC_SNAPPY";
-
-/** String describing BLOSC_ZLIB. */
-const std::string blosc_zlib_str = "BLOSC_ZLIB";
-
-/** String describing BLOSC_ZSTD. */
-const std::string blosc_zstd_str = "BLOSC_ZSTD";
 
 /** String describing RLE. */
 const std::string rle_str = "RLE";
@@ -352,8 +369,11 @@ const std::string unordered_str = "unordered";
 const std::string null_str = "null";
 
 /** The version in format { major, minor, revision }. */
-const int version[3] = {
+const int32_t library_version[3] = {
     TILEDB_VERSION_MAJOR, TILEDB_VERSION_MINOR, TILEDB_VERSION_PATCH};
+
+/** The TileDB serialization format version number. */
+const uint32_t format_version = 2;
 
 /** The maximum size of a tile chunk (unit of compression) in bytes. */
 const uint64_t max_tile_chunk_size = 64 * 1024;
@@ -368,19 +388,10 @@ const std::string default_dim_name = "__dim";
 const std::string key_attr_name = "__key";
 
 /** The key attribute type. */
-Datatype key_attr_type = Datatype::CHAR;
-
-/** The key type attribute name. */
-const std::string key_type_attr_name = "__key_type";
-
-/** The key type attribute type. */
-Datatype key_type_attr_type = Datatype::CHAR;
+Datatype key_attr_type = Datatype::ANY;
 
 /** The key attribute compressor. */
 Compressor key_attr_compressor = Compressor::ZSTD;
-
-/** The key type attribute compressor. */
-Compressor key_type_attr_compressor = Compressor::ZSTD;
 
 /**
  * The name of the first key dimension (recall that a key in a
@@ -467,6 +478,49 @@ const std::string special_name_prefix = "__";
 
 /** Number of milliseconds between watchdog thread wakeups. */
 const unsigned watchdog_thread_sleep_ms = 1000;
+
+const void* fill_value(Datatype type) {
+  switch (type) {
+    case Datatype::INT8:
+      return &constants::empty_int8;
+    case Datatype::UINT8:
+      return &constants::empty_uint8;
+    case Datatype::INT16:
+      return &constants::empty_int16;
+    case Datatype::UINT16:
+      return &constants::empty_uint16;
+    case Datatype::INT32:
+      return &constants::empty_int32;
+    case Datatype::UINT32:
+      return &constants::empty_uint32;
+    case Datatype::INT64:
+      return &constants::empty_int64;
+    case Datatype::UINT64:
+      return &constants::empty_uint64;
+    case Datatype::FLOAT32:
+      return &constants::empty_float32;
+    case Datatype::FLOAT64:
+      return &constants::empty_float64;
+    case Datatype::CHAR:
+      return &constants::empty_char;
+    case Datatype::ANY:
+      return &constants::empty_any;
+    case Datatype::STRING_ASCII:
+      return &constants::empty_ascii;
+    case Datatype::STRING_UTF8:
+      return &constants::empty_utf8;
+    case Datatype::STRING_UTF16:
+      return &constants::empty_utf16;
+    case Datatype::STRING_UTF32:
+      return &constants::empty_utf32;
+    case Datatype::STRING_UCS2:
+      return &constants::empty_ucs2;
+    case Datatype::STRING_UCS4:
+      return &constants::empty_ucs4;
+  }
+
+  return nullptr;
+}
 
 }  // namespace constants
 

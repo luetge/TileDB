@@ -35,32 +35,36 @@
 # Include some common helper functions.
 include(TileDBCommon)
 
-# Search the path set during the superbuild for the EP.
-set(ZSTD_PATHS ${TILEDB_EP_INSTALL_PREFIX})
-
-find_path(ZSTD_INCLUDE_DIR
-  NAMES zstd.h
-  PATHS ${ZSTD_PATHS}
-  PATH_SUFFIXES include
-  ${TILEDB_DEPS_NO_DEFAULT_PATH}
+# First check for a static version in the EP prefix.
+find_library(ZSTD_LIBRARIES
+  NAMES
+    libzstd${CMAKE_STATIC_LIBRARY_SUFFIX}
+    zstd_static${CMAKE_STATIC_LIBRARY_SUFFIX}
+  PATHS ${TILEDB_EP_INSTALL_PREFIX}
+  PATH_SUFFIXES lib
+  NO_DEFAULT_PATH
 )
 
-# Link statically if installed with the EP.
-if (TILEDB_USE_STATIC_ZSTD)
-  find_library(ZSTD_LIBRARIES
-    NAMES
-      libzstd${CMAKE_STATIC_LIBRARY_SUFFIX}
-      zstd_static${CMAKE_STATIC_LIBRARY_SUFFIX}
-    PATHS ${ZSTD_PATHS}
-    PATH_SUFFIXES lib
-    ${TILEDB_DEPS_NO_DEFAULT_PATH}
+if (ZSTD_LIBRARIES)
+  set(ZSTD_STATIC_EP_FOUND TRUE)
+  find_path(ZSTD_INCLUDE_DIR
+    NAMES zstd.h
+    PATHS ${TILEDB_EP_INSTALL_PREFIX}
+    PATH_SUFFIXES include
+    NO_DEFAULT_PATH
   )
 else()
+  set(ZSTD_STATIC_EP_FOUND FALSE)
+  # Static EP not found, search in system paths.
   find_library(ZSTD_LIBRARIES
     NAMES
       zstd libzstd
-    PATHS ${ZSTD_PATHS}
     PATH_SUFFIXES lib bin
+    ${TILEDB_DEPS_NO_DEFAULT_PATH}
+  )
+  find_path(ZSTD_INCLUDE_DIR
+    NAMES zstd.h
+    PATH_SUFFIXES include
     ${TILEDB_DEPS_NO_DEFAULT_PATH}
   )
 endif()
@@ -73,9 +77,14 @@ FIND_PACKAGE_HANDLE_STANDARD_ARGS(Zstd
 if (NOT ZSTD_FOUND)
   if (TILEDB_SUPERBUILD)
     message(STATUS "Adding Zstd as an external project")
+
     if (WIN32)
       set(ARCH_SPEC -A X64)
+      set(LDFLAGS_DEF "")
+    else()
+      set(LDFLAGS_DEF "-DCMAKE_C_FLAGS=-fPIC")
     endif()
+
     ExternalProject_Add(ep_zstd
       PREFIX "externals"
       URL "https://github.com/facebook/zstd/archive/v1.3.4.zip"
@@ -83,6 +92,8 @@ if (NOT ZSTD_FOUND)
       CONFIGURE_COMMAND
         ${CMAKE_COMMAND}
         ${ARCH_SPEC}
+        ${LDFLAGS_DEF}
+        -DCMAKE_BUILD_TYPE=Release
         -DCMAKE_INSTALL_PREFIX=${TILEDB_EP_INSTALL_PREFIX}
         ${TILEDB_EP_BASE}/src/ep_zstd/build/cmake
       UPDATE_COMMAND ""
@@ -92,9 +103,6 @@ if (NOT ZSTD_FOUND)
       LOG_INSTALL TRUE
     )
     list(APPEND TILEDB_EXTERNAL_PROJECTS ep_zstd)
-    list(APPEND FORWARD_EP_CMAKE_ARGS
-      -DTILEDB_USE_STATIC_ZSTD=TRUE
-    )
   else()
     message(FATAL_ERROR "Unable to find Zstd")
   endif()
@@ -109,6 +117,6 @@ if (ZSTD_FOUND AND NOT TARGET Zstd::Zstd)
 endif()
 
 # If we built a static EP, install it if required.
-if (TILEDB_USE_STATIC_ZSTD AND TILEDB_INSTALL_STATIC_DEPS)
+if (ZSTD_STATIC_EP_FOUND AND TILEDB_INSTALL_STATIC_DEPS)
   install_target_libs(Zstd::Zstd)
 endif()

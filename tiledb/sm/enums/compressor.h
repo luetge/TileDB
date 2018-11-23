@@ -35,6 +35,7 @@
 #define TILEDB_COMPRESSOR_H
 
 #include "tiledb/sm/misc/constants.h"
+#include "tiledb/sm/misc/status.h"
 
 #include <cassert>
 
@@ -42,7 +43,7 @@ namespace tiledb {
 namespace sm {
 
 /** Defines the compressor type. */
-enum class Compressor : char {
+enum class Compressor : uint8_t {
 #define TILEDB_COMPRESSOR_ENUM(id) id
 #include "tiledb/sm/c_api/tiledb_enum.h"
 #undef TILEDB_COMPRESSOR_ENUM
@@ -59,18 +60,6 @@ inline const std::string& compressor_str(Compressor type) {
       return constants::zstd_str;
     case Compressor::LZ4:
       return constants::lz4_str;
-    case Compressor::BLOSC_LZ:
-      return constants::blosc_lz_str;
-    case Compressor::BLOSC_LZ4:
-      return constants::blosc_lz4_str;
-    case Compressor::BLOSC_LZ4HC:
-      return constants::blosc_lz4hc_str;
-    case Compressor::BLOSC_SNAPPY:
-      return constants::blosc_snappy_str;
-    case Compressor::BLOSC_ZLIB:
-      return constants::blosc_zlib_str;
-    case Compressor::BLOSC_ZSTD:
-      return constants::blosc_zstd_str;
     case Compressor::RLE:
       return constants::rle_str;
     case Compressor::BZIP2:
@@ -83,6 +72,28 @@ inline const std::string& compressor_str(Compressor type) {
   }
 }
 
+/** Returns the compressor based on the string representation. */
+inline Status compressor_enum(
+    const std::string& compressor_type_str, Compressor* compressor) {
+  if (compressor_type_str == constants::no_compression_str)
+    *compressor = Compressor::NO_COMPRESSION;
+  else if (compressor_type_str == constants::gzip_str)
+    *compressor = Compressor::GZIP;
+  else if (compressor_type_str == constants::zstd_str)
+    *compressor = Compressor::ZSTD;
+  else if (compressor_type_str == constants::lz4_str)
+    *compressor = Compressor::LZ4;
+  else if (compressor_type_str == constants::rle_str)
+    *compressor = Compressor::RLE;
+  else if (compressor_type_str == constants::bzip2_str)
+    *compressor = Compressor::BZIP2;
+  else if (compressor_type_str == constants::double_delta_str)
+    *compressor = Compressor::DOUBLE_DELTA;
+  else {
+    return Status::Error("Invalid Compressor " + compressor_type_str);
+  }
+  return Status::Ok();
+}
 }  // namespace sm
 }  // namespace tiledb
 

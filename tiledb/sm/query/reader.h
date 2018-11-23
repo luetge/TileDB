@@ -34,17 +34,21 @@
 #define TILEDB_READER_H
 
 #include "tiledb/sm/array_schema/array_schema.h"
+#include "tiledb/sm/filter/filter_pipeline.h"
 #include "tiledb/sm/fragment/fragment_metadata.h"
 #include "tiledb/sm/misc/status.h"
 #include "tiledb/sm/query/dense_cell_range_iter.h"
+#include "tiledb/sm/query/types.h"
 #include "tiledb/sm/tile/tile.h"
 
+#include <future>
 #include <list>
 #include <memory>
 
 namespace tiledb {
 namespace sm {
 
+class Array;
 class StorageManager;
 
 /** Processes read queries. */
@@ -85,65 +89,8 @@ class Reader {
      * some buffer.
      */
     bool overflowed_;
-  };
-
-  /** Contains the buffer(s) and buffer size(s) for some attribute. */
-  struct AttributeBuffer {
-    /**
-     * The attribute buffer. In case the attribute is var-sized, this is
-     * the offsets buffer.
-     */
-    void* buffer_;
-    /**
-     * For a var-sized attribute, this is the data buffer. It is `nullptr`
-     * for fixed-sized attributes.
-     */
-    void* buffer_var_;
-    /**
-     * The size (in bytes) of `buffer_`. Note that this size may be altered by
-     * a read query to reflect the useful data written in the buffer.
-     */
-    uint64_t* buffer_size_;
-    /**
-     * The size (in bytes) of `buffer_var_`. Note that this size may be altered
-     * by a read query to reflect the useful data written in the buffer.
-     */
-    uint64_t* buffer_var_size_;
-    /**
-     * This is the original size (in bytes) of `buffer_` (before
-     * potentially altered by the query).
-     */
-    uint64_t original_buffer_size_;
-    /**
-     * This is the original size (in bytes) of `buffer_var_` (before
-     * potentially altered by the query).
-     */
-    uint64_t original_buffer_var_size_;
-
-    /** Constructor. */
-    AttributeBuffer() {
-      buffer_ = nullptr;
-      buffer_var_ = nullptr;
-      buffer_size_ = nullptr;
-      buffer_var_size_ = nullptr;
-      original_buffer_size_ = 0;
-      original_buffer_var_size_ = 0;
-    }
-
-    /** Constructor. */
-    AttributeBuffer(
-        void* buffer,
-        void* buffer_var,
-        uint64_t* buffer_size,
-        uint64_t* buffer_var_size)
-        : buffer_(buffer)
-        , buffer_var_(buffer_var)
-        , buffer_size_(buffer_size)
-        , buffer_var_size_(buffer_var_size) {
-      original_buffer_size_ = *buffer_size;
-      original_buffer_var_size_ =
-          (buffer_var_size_ != nullptr) ? *buffer_var_size : 0;
-    }
+    /** True if the current subarray partition is unsplittable. */
+    bool unsplittable_;
   };
 
   /**
@@ -282,14 +229,35 @@ class Reader {
     uint64_t start_;
     /** The ending cell in the range. */
     uint64_t end_;
+    /**
+     * The coordinates of the start of the range. This is needed for
+     * comparing precednece of ranges. If it is `nullptr` it means
+     * that the precedence check will be based solely on `start_`
+     * and `end_`.
+     */
+    const T* coords_start_;
+    /**
+     * The coordinates of the end of the range. This is needed for
+     * comparing precednece of ranges. If it is `nullptr` it means
+     * that the precedence check will be based solely on `start_`
+     * and `end_`.
+     */
+    const T* coords_end_;
 
     /** Constructor. */
     DenseCellRange(
-        int fragment_idx, const T* tile_coords, uint64_t start, uint64_t end)
+        int fragment_idx,
+        const T* tile_coords,
+        uint64_t start,
+        uint64_t end,
+        const T* coords_start,
+        const T* coords_end)
         : fragment_idx_(fragment_idx)
         , tile_coords_(tile_coords)
         , start_(start)
-        , end_(end) {
+        , end_(end)
+        , coords_start_(coords_start)
+        , coords_end_(coords_end) {
     }
   };
 
@@ -316,6 +284,19 @@ class Reader {
   const ArraySchema* array_schema() const;
 
   /**
+   * Return list of attribtues for query
+   * @return vector of attributes for query
+   */
+  std::vector<std::string> attributes() const;
+
+  /**
+   * Fetch AttributeBuffer for attribute
+   * @param attribute to fetch
+   * @return AttributeBuffer for attribute
+   */
+  AttributeBuffer buffer(const std::string& attribute) const;
+
+  /**
    * Returns `true` if the query was incomplete, i.e., if all subarray
    * partitions in the read state have not been processed or there
    * was some buffer overflow.
@@ -327,6 +308,37 @@ class Reader {
 
   /** Returns a vector with the fragment URIs. */
   std::vector<URI> fragment_uris() const;
+
+  /**
+   * Retrieves the buffer of a fixed-sized attribute.
+   *
+   * @param attribute The buffer attribute.
+   * @param buffer The buffer to be retrieved.
+   * @param buffer_size A pointer to the buffer size to be retrieved.
+   * @return Status
+   */
+  Status get_buffer(
+      const std::string& attribute,
+      void** buffer,
+      uint64_t** buffer_size) const;
+
+  /**
+   * Retrieves the offsets and values buffers of a var-sized attribute.
+   *
+   * @param attribute The buffer attribute.
+   * @param buffer_off The offsets buffer to be retrieved.
+   * @param buffer_off_size A pointer to the offsets buffer size to be
+   * retrieved.
+   * @param buffer_val The values buffer to be retrieved.
+   * @param buffer_val_size A pointer to the values buffer size to be retrieved.
+   * @return Status
+   */
+  Status get_buffer(
+      const std::string& attribute,
+      uint64_t** buffer_off,
+      uint64_t** buffer_off_size,
+      void** buffer_val,
+      uint64_t** buffer_val_size) const;
 
   /** Returns the last fragment uri. */
   URI last_fragment_uri() const;
@@ -352,6 +364,9 @@ class Reader {
 
   /** Performs a read query using its set members. */
   Status read();
+
+  /** Sets the array. */
+  void set_array(const Array* array);
 
   /**
    * Sets the array schema. If the array is a kv store, then this
@@ -421,10 +436,19 @@ class Reader {
    */
   Status set_subarray(const void* subarray);
 
+  /*
+   * Return the subarray
+   * @return subarray
+   */
+  void* subarray() const;
+
  private:
   /* ********************************* */
   /*         PRIVATE ATTRIBUTES        */
   /* ********************************* */
+
+  /** The array. */
+  const Array* array_;
 
   /** The array schema. */
   const ArraySchema* array_schema_;
@@ -561,7 +585,7 @@ class Reader {
    * @return Status
    */
   template <class T>
-  Status compute_tile_coordinates(
+  Status compute_tile_coords(
       std::unique_ptr<T[]>* all_tile_coords,
       OverlappingCoordsList<T>* coords) const;
 
@@ -600,6 +624,32 @@ class Reader {
   Status copy_var_cells(
       const std::string& attribute,
       const OverlappingCellRangeList& cell_ranges);
+
+  /**
+   * Computes offsets into destination buffers for the given attribute's offset
+   * and variable-length data, for the given list of cell ranges.
+   *
+   * @param attribute The variable-length attribute
+   * @param cell_ranges The cell ranges to compute destinations for.
+   * @param offset_offsets_per_cr Output to hold one vector per cell range, and
+   *    one element per cell in the range. The elements are the destination
+   *    offsets for the attribute's offsets.
+   * @param var_offsets_per_cr Output to hold one vector per cell range, and
+   *    one element per cell in the range. The elements are the destination
+   *    offsets for the attribute's variable-length data.
+   * @param total_offset_size Output set to the total size in bytes of the
+   *    offsets in the given list of cell ranges.
+   * @param total_var_size Output set to the total size in bytes of the
+   *    attribute's variable-length in the given list of cell ranges.
+   * @return Status
+   */
+  Status compute_var_cell_destinations(
+      const std::string& attribute,
+      const OverlappingCellRangeList& cell_ranges,
+      std::vector<std::vector<uint64_t>>* offset_offsets_per_cr,
+      std::vector<std::vector<uint64_t>>* var_offsets_per_cr,
+      uint64_t* total_offset_size,
+      uint64_t* total_var_size) const;
 
   /**
    * Deduplicates the input coordinates, breaking ties giving preference
@@ -670,6 +720,42 @@ class Reader {
       const T* start, uint64_t num, void* buff, uint64_t* offset) const;
 
   /**
+   * Filters the tiles on all attributes from all input fragments based on the
+   * tile info in `tiles`.
+   *
+   * @param tiles Vector containing tiles to be filtered.
+   * @param ensure_coords If true (the default), always filter the coordinate
+   *    tiles.
+   * @return Status
+   */
+  Status filter_all_tiles(
+      OverlappingTileVec* tiles, bool ensure_coords = true) const;
+
+  /**
+   * Filters the tiles on a particular attribute from all input fragments
+   * based on the tile info in `tiles`.
+   *
+   * @param attribute Attribute whose tiles will be filtered
+   * @param tiles Vector containing the tiles to be filtered
+   * @return Status
+   */
+  Status filter_tiles(
+      const std::string& attribute, OverlappingTileVec* tiles) const;
+
+  /**
+   * Runs the input tile for the input attribute through the filter pipeline.
+   * The tile buffer is modified to contain the output of the pipeline.
+   *
+   * @param attribute The attribute the tile belong to.
+   * @param tile The tile to be filtered.
+   * @param offsets True if the tile to be filtered contains offsets for a
+   *    var-sized attribute.
+   * @return Status
+   */
+  Status filter_tile(
+      const std::string& attribute, Tile* tile, bool offsets) const;
+
+  /**
    * Gets all the coordinates of the input tile into `coords`.
    *
    * @tparam T The coords type.
@@ -729,22 +815,28 @@ class Reader {
   /**
    * Initializes a fixed-sized tile.
    *
+   * @param format_version The format version of the tile.
    * @param attribute The attribute the tile belongs to.
    * @param tile The tile to be initialized.
    * @return Status
    */
-  Status init_tile(const std::string& attribute, Tile* tile) const;
+  Status init_tile(
+      uint32_t format_version, const std::string& attribute, Tile* tile) const;
 
   /**
    * Initializes a var-sized tile.
    *
+   * @param format_version The format version of the tile.
    * @param attribute The attribute the tile belongs to.
    * @param tile The offsets tile to be initialized.
    * @param tile_var The var-sized data tile to be initialized.
    * @return Status
    */
   Status init_tile(
-      const std::string& attribute, Tile* tile, Tile* tile_var) const;
+      uint32_t format_version,
+      const std::string& attribute,
+      Tile* tile,
+      Tile* tile_var) const;
 
   /**
    * Initializes the fragment dense cell range iterators. There is one vector
@@ -770,22 +862,6 @@ class Reader {
   void optimize_layout_for_1D();
 
   /**
-   * Checks whether two hyper-rectangles overlap, and determines whether
-   * the first rectangle contains the second.
-   *
-   * @tparam T The domain type.
-   * @param a The first rectangle.
-   * @param b The second rectangle.
-   * @param dim_num The number of dimensions.
-   * @param a_contains_b Determines whether the first rectangle contains the
-   *     second.
-   * @return `True` if the rectangles overlap, and `false` otherwise.
-   */
-  template <class T>
-  bool overlap(
-      const T* a, const T* b, unsigned dim_num, bool* a_contains_b) const;
-
-  /**
    * Retrieves the tiles on all attributes from all input fragments based on
    * the tile info in `tiles`.
    *
@@ -801,12 +877,18 @@ class Reader {
    * Retrieves the tiles on a particular attribute from all input fragments
    * based on the tile info in `tiles`.
    *
+   * The reads are done asynchronously, and futures for each read operation are
+   * added to the output parameter.
+   *
    * @param attribute The attribute name.
    * @param tiles The retrieved tiles will be stored in `tiles`.
+   * @param tasks Vector to hold futures for the read tasks.
    * @return Status
    */
   Status read_tiles(
-      const std::string& attribute, OverlappingTileVec* tiles) const;
+      const std::string& attribute,
+      OverlappingTileVec* tiles,
+      std::vector<std::future<Status>>* tasks) const;
 
   /**
    * Resets the buffer sizes to the original buffer sizes. This is because

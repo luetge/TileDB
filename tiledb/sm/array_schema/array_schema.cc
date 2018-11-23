@@ -33,6 +33,7 @@
 
 #include "tiledb/sm/array_schema/array_schema.h"
 #include "tiledb/sm/buffer/const_buffer.h"
+#include "tiledb/sm/filter/compression_filter.h"
 #include "tiledb/sm/misc/logger.h"
 
 #include <cassert>
@@ -52,15 +53,17 @@ ArraySchema::ArraySchema() {
   array_type_ = ArrayType::DENSE;
   capacity_ = constants::capacity;
   cell_order_ = Layout::ROW_MAJOR;
-  cell_var_offsets_compression_ = constants::cell_var_offsets_compression;
-  cell_var_offsets_compression_level_ =
-      constants::cell_var_offsets_compression_level;
-  coords_compression_ = constants::coords_compression;
-  coords_compression_level_ = constants::coords_compression_level;
   is_kv_ = false;
   domain_ = nullptr;
   tile_order_ = Layout::ROW_MAJOR;
-  std::memcpy(version_, constants::version, sizeof(version_));
+  version_ = constants::format_version;
+
+  // Set up default filter pipelines for coords and offsets
+  coords_filters_.add_filter(CompressionFilter(
+      constants::coords_compression, constants::coords_compression_level));
+  cell_var_offsets_filters_.add_filter(CompressionFilter(
+      constants::cell_var_offsets_compression,
+      constants::cell_var_offsets_compression_level));
 }
 
 ArraySchema::ArraySchema(ArrayType array_type)
@@ -68,15 +71,17 @@ ArraySchema::ArraySchema(ArrayType array_type)
   array_uri_ = URI();
   capacity_ = constants::capacity;
   cell_order_ = Layout::ROW_MAJOR;
-  cell_var_offsets_compression_ = constants::cell_var_offsets_compression;
-  cell_var_offsets_compression_level_ =
-      constants::cell_var_offsets_compression_level;
-  coords_compression_ = constants::coords_compression;
-  coords_compression_level_ = constants::coords_compression_level;
   is_kv_ = false;
   domain_ = nullptr;
   tile_order_ = Layout::ROW_MAJOR;
-  std::memcpy(version_, constants::version, sizeof(version_));
+  version_ = constants::format_version;
+
+  // Set up default filter pipelines for coords and offsets
+  coords_filters_.add_filter(CompressionFilter(
+      constants::coords_compression, constants::coords_compression_level));
+  cell_var_offsets_filters_.add_filter(CompressionFilter(
+      constants::cell_var_offsets_compression,
+      constants::cell_var_offsets_compression_level));
 }
 
 ArraySchema::ArraySchema(const ArraySchema* array_schema) {
@@ -84,6 +89,15 @@ ArraySchema::ArraySchema(const ArraySchema* array_schema) {
   array_type_ = array_schema->array_type_;
   is_kv_ = array_schema->is_kv_;
   domain_ = nullptr;
+
+  capacity_ = array_schema->capacity_;
+  cell_order_ = array_schema->cell_order_;
+  cell_sizes_ = array_schema->cell_sizes_;
+  cell_var_offsets_filters_ = array_schema->cell_var_offsets_filters_;
+  coords_filters_ = array_schema->coords_filters_;
+  coords_size_ = array_schema->coords_size_;
+  tile_order_ = array_schema->tile_order_;
+  version_ = array_schema->version_;
 
   if (is_kv_) {
     set_kv_attributes();
@@ -93,24 +107,11 @@ ArraySchema::ArraySchema(const ArraySchema* array_schema) {
   }
 
   for (auto attr : array_schema->attributes_) {
-    if (attr->name() != constants::key_attr_name &&
-        attr->name() != constants::key_type_attr_name)
+    if (attr->name() != constants::key_attr_name)
       add_attribute(attr);
   }
   for (const auto& attr : attributes_)
     attribute_map_[attr->name()] = attr;
-
-  capacity_ = array_schema->capacity_;
-  cell_order_ = array_schema->cell_order_;
-  cell_sizes_ = array_schema->cell_sizes_;
-  cell_var_offsets_compression_ = array_schema->cell_var_offsets_compression_;
-  cell_var_offsets_compression_level_ =
-      array_schema->cell_var_offsets_compression_level_;
-  coords_compression_ = array_schema->coords_compression_;
-  coords_compression_level_ = array_schema->coords_compression_level_;
-  coords_size_ = array_schema->coords_size_;
-  tile_order_ = array_schema->tile_order_;
-  std::memcpy(version_, array_schema->version_, sizeof(version_));
 }
 
 ArraySchema::~ArraySchema() {
@@ -202,12 +203,20 @@ unsigned int ArraySchema::cell_val_num(const std::string& attribute) const {
   return it->second->cell_val_num();
 }
 
+const FilterPipeline* ArraySchema::cell_var_offsets_filters() const {
+  return &cell_var_offsets_filters_;
+}
+
 Compressor ArraySchema::cell_var_offsets_compression() const {
-  return cell_var_offsets_compression_;
+  auto* compressor = cell_var_offsets_filters_.get_filter<CompressionFilter>();
+  assert(compressor != nullptr);
+  return compressor->compressor();
 }
 
 int ArraySchema::cell_var_offsets_compression_level() const {
-  return cell_var_offsets_compression_level_;
+  auto* compressor = cell_var_offsets_filters_.get_filter<CompressionFilter>();
+  assert(compressor != nullptr);
+  return compressor->compression_level();
 }
 
 Status ArraySchema::check() const {
@@ -259,11 +268,23 @@ Status ArraySchema::check_attributes(
   return Status::Ok();
 }
 
+const FilterPipeline* ArraySchema::filters(const std::string& attribute) const {
+  auto it = attribute_map_.find(attribute);
+  if (it == attribute_map_.end()) {
+    if (attribute == constants::coords)
+      return coords_filters();
+    assert(false);   // This should never happen
+    return nullptr;  // Return something ad hoc
+  }
+
+  return it->second->filters();
+}
+
 Compressor ArraySchema::compression(const std::string& attribute) const {
   auto it = attribute_map_.find(attribute);
   if (it == attribute_map_.end()) {
     if (attribute == constants::coords)
-      return coords_compression_;
+      return coords_compression();
     assert(false);                      // This should never happen
     return Compressor::NO_COMPRESSION;  // Return something ad hoc
   }
@@ -275,7 +296,7 @@ int ArraySchema::compression_level(const std::string& attribute) const {
   auto it = attribute_map_.find(attribute);
   if (it == attribute_map_.end()) {
     if (attribute == constants::coords)
-      return coords_compression_level_;
+      return coords_compression_level();
     assert(false);  // This should never happen
     return -1;      // Return something ad hoc
   }
@@ -283,12 +304,20 @@ int ArraySchema::compression_level(const std::string& attribute) const {
   return it->second->compression_level();
 }
 
+const FilterPipeline* ArraySchema::coords_filters() const {
+  return &coords_filters_;
+}
+
 Compressor ArraySchema::coords_compression() const {
-  return coords_compression_;
+  auto compressor = coords_filters_.get_filter<CompressionFilter>();
+  assert(compressor != nullptr);
+  return compressor->compressor();
 }
 
 int ArraySchema::coords_compression_level() const {
-  return coords_compression_level_;
+  auto compressor = coords_filters_.get_filter<CompressionFilter>();
+  assert(compressor != nullptr);
+  return compressor->compression_level();
 }
 
 uint64_t ArraySchema::coords_size() const {
@@ -319,11 +348,11 @@ void ArraySchema::dump(FILE* out) const {
   fprintf(
       out,
       "- Coordinates compressor: %s\n",
-      compressor_str(coords_compression_).c_str());
+      compressor_str(coords_compression()).c_str());
   fprintf(
       out,
       "- Coordinates compression level: %d\n\n",
-      coords_compression_level_);
+      coords_compression_level());
 
   if (domain_ != nullptr)
     domain_->dump(out);
@@ -339,54 +368,47 @@ bool ArraySchema::is_kv() const {
 }
 
 // ===== FORMAT =====
-// version (int[3])
-// array_type (char)
-// is_kv (bool)
-// tile_order (char)
-// cell_order (char)
+// version (uint32_t)
+// array_type (uint8_t)
+// tile_order (uint8_t)
+// cell_order (uint8_t)
 // capacity (uint64_t)
-// coords_compression (char)
-// coords_compression_level (int)
-// cell_var_offsets_compression (char)
-// cell_var_offsets_compression_level (int)
+// coords_filters (see FilterPipeline::serialize)
+// cell_var_offsets_filters (see FilterPipeline::serialize)
 // domain
-// attribute_num (unsigned int)
+// attribute_num (uint32_t)
 //   attribute #1
 //   attribute #2
 //   ...
 Status ArraySchema::serialize(Buffer* buff) const {
   // Write version
-  RETURN_NOT_OK(buff->write(constants::version, sizeof(constants::version)));
+  RETURN_NOT_OK(buff->write(&version_, sizeof(uint32_t)));
 
   // Write array type
-  auto array_type = (char)array_type_;
-  RETURN_NOT_OK(buff->write(&array_type, sizeof(char)));
+  auto array_type = (uint8_t)array_type_;
+  RETURN_NOT_OK(buff->write(&array_type, sizeof(uint8_t)));
 
   // Write tile and cell order
-  auto tile_order = (char)tile_order_;
-  RETURN_NOT_OK(buff->write(&tile_order, sizeof(char)));
-  auto cell_order = (char)cell_order_;
-  RETURN_NOT_OK(buff->write(&cell_order, sizeof(char)));
+  auto tile_order = (uint8_t)tile_order_;
+  RETURN_NOT_OK(buff->write(&tile_order, sizeof(uint8_t)));
+  auto cell_order = (uint8_t)cell_order_;
+  RETURN_NOT_OK(buff->write(&cell_order, sizeof(uint8_t)));
 
   // Write capacity
   RETURN_NOT_OK(buff->write(&capacity_, sizeof(uint64_t)));
 
-  // Write coords compression
-  auto compressor = static_cast<char>(coords_compression_);
-  RETURN_NOT_OK(buff->write(&compressor, sizeof(char)));
-  RETURN_NOT_OK(buff->write(&coords_compression_level_, sizeof(int)));
+  // Write coords filters
+  RETURN_NOT_OK(coords_filters_.serialize(buff));
 
-  // Write offsets compression
-  auto offset_compressor = static_cast<char>(cell_var_offsets_compression_);
-  RETURN_NOT_OK(buff->write(&offset_compressor, sizeof(char)));
-  RETURN_NOT_OK(buff->write(&cell_var_offsets_compression_level_, sizeof(int)));
+  // Write offsets filters
+  RETURN_NOT_OK(cell_var_offsets_filters_.serialize(buff));
 
   // Write domain
   domain_->serialize(buff);
 
   // Write attributes
-  auto attribute_num = attributes_.size();
-  RETURN_NOT_OK(buff->write(&attribute_num, sizeof(unsigned int)));
+  auto attribute_num = (uint32_t)attributes_.size();
+  RETURN_NOT_OK(buff->write(&attribute_num, sizeof(uint32_t)));
   for (auto& attr : attributes_)
     RETURN_NOT_OK(attr->serialize(buff));
 
@@ -426,14 +448,14 @@ bool ArraySchema::var_size(const std::string& attribute) const {
   return it->second->var_size();
 }
 
-Status ArraySchema::add_attribute(const Attribute* attr) {
+Status ArraySchema::add_attribute(const Attribute* attr, bool check_special) {
   // Sanity check
   if (attr == nullptr)
     return LOG_STATUS(Status::ArraySchemaError(
         "Cannot add attribute; Input attribute is null"));
 
   // Do not allow attributes with special names
-  if (attr->name().find(constants::special_name_prefix) == 0) {
+  if (check_special && attr->name().find(constants::special_name_prefix) == 0) {
     std::string msg = "Cannot add attribute; Attribute names starting with '";
     msg += std::string(constants::special_name_prefix) + "' are reserved";
     return LOG_STATUS(Status::ArraySchemaError(msg));
@@ -459,18 +481,15 @@ Status ArraySchema::add_attribute(const Attribute* attr) {
 }
 
 // ===== FORMAT =====
-// version (int[3])
-// array_type (char)
-// is_kv (bool)
-// tile_order (char)
-// cell_order (char)
+// version (uint32_t)
+// array_type (uint8_t)
+// tile_order (uint8_t)
+// cell_order (uint8_t)
 // capacity (uint64_t)
-// coords_compression (char)
-// coords_compression_level (int)
-// cell_var_offsets_compression (char)
-// cell_var_offsets_compression_level (int)
+// coords_filters (see FilterPipeline::serialize)
+// cell_var_offsets_filters (see FilterPipeline::serialize)
 // domain
-// attribute_num (unsigned int)
+// attribute_num (uint32_t)
 //   attribute #1
 //   attribute #2
 //   ...
@@ -478,48 +497,42 @@ Status ArraySchema::deserialize(ConstBuffer* buff, bool is_kv) {
   is_kv_ = is_kv;
 
   // Load version
-  RETURN_NOT_OK(buff->read(version_, sizeof(version_)));
+  RETURN_NOT_OK(buff->read(&version_, sizeof(uint32_t)));
 
   // Load array type
-  char array_type;
-  RETURN_NOT_OK(buff->read(&array_type, sizeof(char)));
+  uint8_t array_type;
+  RETURN_NOT_OK(buff->read(&array_type, sizeof(uint8_t)));
   array_type_ = (ArrayType)array_type;
 
   // Load tile order
-  char tile_order;
-  RETURN_NOT_OK(buff->read(&tile_order, sizeof(char)));
+  uint8_t tile_order;
+  RETURN_NOT_OK(buff->read(&tile_order, sizeof(uint8_t)));
   tile_order_ = (Layout)tile_order;
 
   // Load cell order
-  char cell_order;
-  RETURN_NOT_OK(buff->read(&cell_order, sizeof(char)));
+  uint8_t cell_order;
+  RETURN_NOT_OK(buff->read(&cell_order, sizeof(uint8_t)));
   cell_order_ = (Layout)cell_order;
 
   // Load capacity
   RETURN_NOT_OK(buff->read(&capacity_, sizeof(uint64_t)));
 
-  // Load coords compression
-  char compressor;
-  RETURN_NOT_OK(buff->read(&compressor, sizeof(char)));
-  coords_compression_ = static_cast<Compressor>(compressor);
-  RETURN_NOT_OK(buff->read(&coords_compression_level_, sizeof(int)));
+  // Load coords filters
+  RETURN_NOT_OK(coords_filters_.deserialize(buff));
 
-  // Load offsets compression
-  char offsets_compressor;
-  RETURN_NOT_OK(buff->read(&offsets_compressor, sizeof(char)));
-  cell_var_offsets_compression_ = static_cast<Compressor>(offsets_compressor);
-  RETURN_NOT_OK(buff->read(&cell_var_offsets_compression_level_, sizeof(int)));
+  // Load offsets filters
+  RETURN_NOT_OK(cell_var_offsets_filters_.deserialize(buff));
 
   // Load domain
   domain_ = new Domain();
   RETURN_NOT_OK(domain_->deserialize(buff));
 
   // Load attributes
-  unsigned attribute_num;
-  RETURN_NOT_OK(buff->read(&attribute_num, sizeof(unsigned int)));
-  for (unsigned int i = 0; i < attribute_num; ++i) {
+  uint32_t attribute_num;
+  RETURN_NOT_OK(buff->read(&attribute_num, sizeof(uint32_t)));
+  for (uint32_t i = 0; i < attribute_num; ++i) {
     auto attr = new Attribute();
-    attr->deserialize(buff);
+    RETURN_NOT_OK_ELSE(attr->deserialize(buff), delete attr);
     attributes_.emplace_back(attr);
   }
 
@@ -590,20 +603,39 @@ void ArraySchema::set_capacity(uint64_t capacity) {
 }
 
 void ArraySchema::set_coords_compressor(Compressor compressor) {
-  coords_compression_ = compressor;
+  auto* filter = coords_filters_.get_filter<CompressionFilter>();
+  assert(filter != nullptr);
+  filter->set_compressor(compressor);
 }
 
 void ArraySchema::set_coords_compression_level(int compression_level) {
-  coords_compression_level_ = compression_level;
+  auto* filter = coords_filters_.get_filter<CompressionFilter>();
+  assert(filter != nullptr);
+  filter->set_compression_level(compression_level);
+}
+
+Status ArraySchema::set_coords_filter_pipeline(const FilterPipeline* pipeline) {
+  coords_filters_ = *pipeline;
+  return Status::Ok();
 }
 
 void ArraySchema::set_cell_var_offsets_compressor(Compressor compressor) {
-  cell_var_offsets_compression_ = compressor;
+  auto* filter = cell_var_offsets_filters_.get_filter<CompressionFilter>();
+  assert(filter != nullptr);
+  filter->set_compressor(compressor);
 }
 
 void ArraySchema::set_cell_var_offsets_compression_level(
     int compression_level) {
-  cell_var_offsets_compression_level_ = compression_level;
+  auto* filter = cell_var_offsets_filters_.get_filter<CompressionFilter>();
+  assert(filter != nullptr);
+  filter->set_compression_level(compression_level);
+}
+
+Status ArraySchema::set_cell_var_offsets_filter_pipeline(
+    const FilterPipeline* pipeline) {
+  cell_var_offsets_filters_ = *pipeline;
+  return Status::Ok();
 }
 
 void ArraySchema::set_cell_order(Layout cell_order) {
@@ -634,8 +666,8 @@ Status ArraySchema::set_domain(Domain* domain) {
   // Potentially change the default coordinates compressor
   if ((domain_->type() == Datatype::FLOAT32 ||
        domain_->type() == Datatype::FLOAT64) &&
-      coords_compression_ == Compressor::DOUBLE_DELTA)
-    coords_compression_ = constants::real_coords_compression;
+      coords_compression() == Compressor::DOUBLE_DELTA)
+    set_coords_compressor(constants::real_coords_compression);
 
   return Status::Ok();
 }
@@ -662,7 +694,7 @@ bool ArraySchema::check_double_delta_compressor() const {
   // Check coordinates
   if ((domain_->type() == Datatype::FLOAT32 ||
        domain_->type() == Datatype::FLOAT64) &&
-      coords_compression_ == Compressor::DOUBLE_DELTA)
+      coords_compression() == Compressor::DOUBLE_DELTA)
     return false;
 
   // Check attributes
@@ -718,15 +750,8 @@ Status ArraySchema::set_kv_attributes() {
   // Add key attribute
   auto key_attr =
       new Attribute(constants::key_attr_name, constants::key_attr_type);
-  key_attr->set_cell_val_num(constants::var_num);
   key_attr->set_compressor(constants::key_attr_compressor);
   attributes_.emplace_back(key_attr);
-
-  // Add key type attribute
-  auto key_type_attr = new Attribute(
-      constants::key_type_attr_name, constants::key_type_attr_type);
-  key_type_attr->set_compressor(constants::key_type_attr_compressor);
-  attributes_.emplace_back(key_type_attr);
 
   return Status::Ok();
 }
@@ -734,7 +759,7 @@ Status ArraySchema::set_kv_attributes() {
 Status ArraySchema::set_kv_domain() {
   delete domain_;
   domain_ = new Domain(Datatype::UINT64);
-  uint64_t dim_domain[] = {0, UINT64_MAX};
+  uint64_t dim_domain[] = {0, UINT64_MAX - 1};
 
   auto dim_1 = new Dimension(constants::key_dim_1, Datatype::UINT64);
   RETURN_NOT_OK_ELSE(dim_1->set_domain(dim_domain), delete dim_1);

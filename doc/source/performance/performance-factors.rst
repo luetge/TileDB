@@ -58,12 +58,13 @@ Dimensions vs. attributes
     on dimensions (i.e. a read query can specify only a subset of attributes should
     be read, but it must always specify all dimensions).
 
-Compression
-    Compression of attributes can reduce persistent storage consumption, but
-    at the expense of increased time to read/write tiles from/to the array. However,
-    tiles on disk that are smaller due to compression can be read from disk in
-    less time, which can improve performance. Finally, many compressors offer
-    different levels of compression, which can be used to fine-tune the tradeoff.
+Filtering
+    Filtering (such as compression) of attributes can reduce persistent storage
+    consumption, but at the expense of increased time to read/write tiles
+    from/to the array. However, tiles on disk that are smaller due to
+    compression can be read from disk in less time, which can improve
+    performance. Additionally, many compressors offer different levels of
+    compression, which can be used to fine-tune the tradeoff.
 
 Queries
 -------
@@ -141,6 +142,13 @@ Coordinate deduplication -- ``sm.dedup_coords`` and ``sm.check_coord_dups``
     error if any are found. Disabling these checks can lead to better performance
     on writes.
 
+Coordinate out-of-bounds-check -- ``sm.check_coord_oob``
+    During sparse writes, setting ``sm.check_coord_oob`` to ``true`` (default) will
+    cause TileDB to internally check whether the given coordinates fall outside
+    the domain or not. If you are certain that this is not possible in your
+    application, you can set this param to ``false``, avoiding the check and
+    thus boosting performance.
+
 Async query concurrency -- ``sm.num_async_threads``
     By default only one thread is allocated to handle async queries. Increasing
     this parameter value can lead to better performance if you are issuing many
@@ -151,6 +159,18 @@ Thread pool size -- ``sm.num_tbb_threads``
     sorting. A TBB-based thread pool is used for these operations, and changing
     this config parameter from the default (while not recommended) can lead
     to better performance in certain circumstances.
+
+Reader thread pool size -- ``sm.num_reader_threads``
+    Read operations for read queries can be issued to the VFS layer in parallel
+    (the VFS layer may additionally parallelize large I/O operations). For some
+    hardware configurations, increasing the number of parallel VFS read
+    operations with this parameter may increase performance.
+
+Writer thread pool size -- ``sm.num_writer_threads``
+    Write operations for write queries can be issued to the VFS layer in parallel
+    (the VFS layer may additionally parallelize large I/O operations). For some
+    hardware configurations, increasing the number of parallel VFS write
+    operations with this parameter may increase performance.
 
 VFS thread pool size -- ``vfs.num_threads``
     The virtual filesystem (VFS) subsystem in TileDB maintains a separate thread

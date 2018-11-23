@@ -61,6 +61,8 @@ if (TILEDB_CPP_API)
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/dimension.h
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/domain.h
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/exception.h
+    ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/filter.h
+    ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/filter_list.h
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/group.h
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/map.h
     ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cpp_api/map_schema.h
@@ -80,6 +82,7 @@ endif()
 
 # List of all core source files
 set(TILEDB_CORE_SOURCES
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/array/array.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/array_schema/array_schema.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/array_schema/attribute.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/array_schema/dimension.cc
@@ -89,22 +92,39 @@ set(TILEDB_CORE_SOURCES
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/buffer/preallocated_buffer.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/c_api/tiledb.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/cache/lru_cache.cc
-  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/blosc_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/bzip_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/dd_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/gzip_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/lz4_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/rle_compressor.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/compressors/zstd_compressor.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/encryption/encryption.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/encryption/encryption_key.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/encryption/encryption_key_validation.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/encryption/encryption_openssl.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/encryption/encryption_win32.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/hdfs_filesystem.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/posix.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/s3.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/vfs.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/vfs_file_handle.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filesystem/win.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/bit_width_reduction_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/bitshuffle_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/byteshuffle_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/compression_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/encryption_aes256gcm_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/filter_buffer.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/filter_pipeline.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/filter_storage.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/noop_filter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/filter/positive_delta_filter.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/fragment/fragment_metadata.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/global_state/global_state.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/global_state/openssl_state.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/global_state/signal_handlers.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/global_state/tbb_state.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/global_state/watchdog.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/kv/kv.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/kv/kv_item.cc
@@ -122,7 +142,9 @@ set(TILEDB_CORE_SOURCES
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/query/reader.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/query/writer.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/query/dense_cell_range_iter.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/context.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/config.cc
+  ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/config_iter.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/consolidator.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/open_array.cc
   ${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/storage_manager/storage_manager.cc
@@ -131,9 +153,19 @@ set(TILEDB_CORE_SOURCES
 )
 
 # 'External' source files included in the source tree.
-set(TILEDB_EXTERNALS_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/../external/include")
+set(TILEDB_EXTERNALS_INCLUDE_DIRS
+  "${CMAKE_CURRENT_SOURCE_DIR}/../external/include"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../external/include/bitshuffle"
+  "${CMAKE_CURRENT_SOURCE_DIR}/../external/include/blosc"
+)
 set(TILEDB_EXTERNALS_SOURCES
   ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/md5/md5.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/bitshuffle/iochain.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/bitshuffle/bitshuffle_core.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/blosc/shuffle.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/blosc/shuffle-avx2.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/blosc/shuffle-generic.cc
+  ${CMAKE_CURRENT_SOURCE_DIR}/../external/src/blosc/shuffle-sse2.cc
 )
 
 ############################################################
@@ -152,8 +184,25 @@ target_include_directories(TILEDB_CORE_OBJECTS
   PRIVATE
     "${TILEDB_CORE_INCLUDE_DIR}"
     "${TILEDB_CORE_INCLUDE_DIR}/tiledb/sm/c_api"
-    "${TILEDB_EXTERNALS_INCLUDE_DIR}"
+    "${TILEDB_EXTERNALS_INCLUDE_DIRS}"
 )
+
+# Build a separate copy of the object library for use with static TileDB
+# on Windows. See https://github.com/TileDB-Inc/TileDB/issues/673
+if (WIN32 AND TILEDB_STATIC)
+  add_library(TILEDB_CORE_OBJECTS_STATIC OBJECT
+    ${TILEDB_CORE_SOURCES}
+    ${TILEDB_EXTERNALS_SOURCES}
+  )
+
+  # Compile all core sources with PIC
+  set_property(TARGET TILEDB_CORE_OBJECTS_STATIC PROPERTY POSITION_INDEPENDENT_CODE ON)
+
+  target_compile_definitions(TILEDB_CORE_OBJECTS_STATIC
+    PRIVATE
+      -DTILEDB_STATIC_DEFINE
+  )
+endif()
 
 if (TILEDB_CPP_API)
   target_include_directories(TILEDB_CORE_OBJECTS
@@ -270,7 +319,6 @@ endif()
 # Required dependencies. These come last as any prior dependencies relying on
 # these must be listed first for Linux. E.g. AWSSDK and Curl depend on Zlib,
 # which is installed here.
-find_package(Blosc_EP REQUIRED)
 find_package(Bzip2_EP REQUIRED)
 find_package(LZ4_EP REQUIRED)
 find_package(Spdlog_EP REQUIRED)
@@ -278,7 +326,6 @@ find_package(Zlib_EP REQUIRED)
 find_package(Zstd_EP REQUIRED)
 target_link_libraries(TILEDB_CORE_OBJECTS_ILIB
   INTERFACE
-    Blosc::Blosc
     Bzip2::Bzip2
     LZ4::LZ4
     Spdlog::Spdlog
@@ -295,7 +342,7 @@ endif()
 
 # Win32 specific libraries
 if (WIN32)
-  set(WIN32_LIBS shlwapi rpcrt4)
+  set(WIN32_LIBS shlwapi rpcrt4 bcrypt)
 
   if (TILEDB_S3)
     list(APPEND WIN32_LIBS bcrypt winhttp wininet userenv version)
@@ -346,7 +393,6 @@ if (TILEDB_STATIC)
     endif()
   endmacro()
 
-  append_dep_lib(Blosc::Blosc)
   append_dep_lib(Bzip2::Bzip2)
   append_dep_lib(Curl::Curl)
   append_dep_lib(LZ4::LZ4)
@@ -386,20 +432,47 @@ target_link_libraries(tiledb_shared
 )
 
 if (TILEDB_STATIC)
-  add_library(tiledb_static STATIC $<TARGET_OBJECTS:TILEDB_CORE_OBJECTS>)
-  set_target_properties(tiledb_static
-    PROPERTIES
-      OUTPUT_NAME "tiledb"
-  )
+  if (WIN32)
+    # Copy over all include directories, compile options, etc, from the regular
+    # core objects.
+    target_compile_definitions(TILEDB_CORE_OBJECTS_STATIC
+      PRIVATE
+        $<TARGET_PROPERTY:TILEDB_CORE_OBJECTS,COMPILE_DEFINITIONS>
+    )
+    target_compile_options(TILEDB_CORE_OBJECTS_STATIC
+      PRIVATE
+        $<TARGET_PROPERTY:TILEDB_CORE_OBJECTS,COMPILE_OPTIONS>
+    )
+    target_include_directories(TILEDB_CORE_OBJECTS_STATIC
+      PRIVATE
+        $<TARGET_PROPERTY:TILEDB_CORE_OBJECTS,INCLUDE_DIRECTORIES>
+    )
+    # Create the target
+    add_library(tiledb_static STATIC
+      $<TARGET_OBJECTS:TILEDB_CORE_OBJECTS_STATIC>
+    )
+    target_compile_definitions(tiledb_static
+      INTERFACE
+        -DTILEDB_STATIC_DEFINE
+    )
+    # On Windows we must name the static library something else to avoid
+    # name clash with the DLL's "import library" .lib file.
+    set_target_properties(tiledb_static
+      PROPERTIES
+        OUTPUT_NAME "tiledbstatic"
+    )
+  else()
+    add_library(tiledb_static STATIC $<TARGET_OBJECTS:TILEDB_CORE_OBJECTS>)
+    set_target_properties(tiledb_static
+      PROPERTIES
+        OUTPUT_NAME "tiledb"
+    )
+  endif()
+
   target_link_libraries(tiledb_static
     PRIVATE
       $<TARGET_PROPERTY:TILEDB_CORE_OBJECTS_ILIB,INTERFACE_LINK_LIBRARIES>
   )
-  # On Windows we must name the static library something else to avoid
-  # name clash with the DLL's "import library" .lib file.
-  if (WIN32)
-    set_target_properties(tiledb_static PROPERTIES OUTPUT_NAME "tiledbstatic")
-  endif()
 endif()
 
 ############################################################
@@ -455,6 +528,11 @@ if (NOT WIN32)
     PROPERTIES
       INSTALL_RPATH "${CMAKE_INSTALL_PREFIX}/${CMAKE_INSTALL_LIBDIR}"
   )
+endif()
+
+# Override CMAKE_INSTALL_LIBDIR value from GNUInstallDirs if specified.
+if (NOT TILEDB_INSTALL_LIBDIR STREQUAL "")
+  set(CMAKE_INSTALL_LIBDIR "${TILEDB_INSTALL_LIBDIR}" CACHE STRING "" FORCE)
 endif()
 
 # List of targets to install.

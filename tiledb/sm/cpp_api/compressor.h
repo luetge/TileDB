@@ -35,6 +35,7 @@
 #ifndef TILEDB_CPP_API_COMPRESSOR_H
 #define TILEDB_CPP_API_COMPRESSOR_H
 
+#include "exception.h"
 #include "tiledb.h"
 
 #include <iostream>
@@ -51,8 +52,11 @@ namespace tiledb {
  *
  * @code{.cpp}
  * auto a1 = tiledb::Attribute::create<int>(ctx, "a1");
- * a1.set_compressor({TILEDB_BLOSC_LZ, -1});
+ * a1.set_compressor({TILEDB_BZIP2, -1});
  * @endcode
+ *
+ * @note This class is deprecated and will be removed in a future version.
+ *       The filter API should be used instead.
  */
 class Compressor {
  public:
@@ -107,18 +111,6 @@ class Compressor {
         return "ZSTD";
       case TILEDB_LZ4:
         return "LZ4";
-      case TILEDB_BLOSC_LZ:
-        return "BLOSC_LZ";
-      case TILEDB_BLOSC_LZ4:
-        return "BLOSC_LZ4";
-      case TILEDB_BLOSC_LZ4HC:
-        return "BLOSC_LZ4HC";
-      case TILEDB_BLOSC_SNAPPY:
-        return "BLOSC_SNAPPY";
-      case TILEDB_BLOSC_ZLIB:
-        return "BLOSC_ZLIB";
-      case TILEDB_BLOSC_ZSTD:
-        return "BLOSC_ZSTD";
       case TILEDB_RLE:
         return "RLE";
       case TILEDB_BZIP2:
@@ -127,6 +119,27 @@ class Compressor {
         return "DOUBLE_DELTA";
     }
     return "Invalid";
+  }
+
+  /** Converts the input compressor type to a filter type. */
+  static tiledb_filter_type_t to_filter(tiledb_compressor_t c) {
+    switch (c) {
+      case TILEDB_NO_COMPRESSION:
+        return TILEDB_FILTER_NONE;
+      case TILEDB_GZIP:
+        return TILEDB_FILTER_GZIP;
+      case TILEDB_ZSTD:
+        return TILEDB_FILTER_ZSTD;
+      case TILEDB_LZ4:
+        return TILEDB_FILTER_LZ4;
+      case TILEDB_RLE:
+        return TILEDB_FILTER_RLE;
+      case TILEDB_BZIP2:
+        return TILEDB_FILTER_BZIP2;
+      case TILEDB_DOUBLE_DELTA:
+        return TILEDB_FILTER_DOUBLE_DELTA;
+    }
+    throw TileDBError("[TileDB::C++API] Error: Unknown compressor type.");
   }
 
  private:

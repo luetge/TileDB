@@ -574,7 +574,7 @@ Status VFS::init(const Config::VFSParams& vfs_params) {
   if (hdfs_.get() == nullptr) {
     return LOG_STATUS(Status::VFSError("Could not create VFS HDFS backend"));
   }
-  RETURN_NOT_OK(hdfs_->connect(vfs_params.hdfs_params_));
+  RETURN_NOT_OK(hdfs_->init(vfs_params.hdfs_params_));
 #endif
 
 #ifdef HAVE_S3
@@ -751,7 +751,7 @@ Status VFS::read(
   } else {
     STATS_COUNTER_ADD(vfs_read_num_parallelized, 1);
     std::vector<std::future<Status>> results;
-    uint64_t thread_read_nbytes = utils::ceil(nbytes, num_ops);
+    uint64_t thread_read_nbytes = utils::math::ceil(nbytes, num_ops);
 
     for (uint64_t i = 0; i < num_ops; i++) {
       uint64_t begin = i * thread_read_nbytes,

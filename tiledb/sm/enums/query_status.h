@@ -34,15 +34,58 @@
 #ifndef TILEDB_QUERY_STATUS_H
 #define TILEDB_QUERY_STATUS_H
 
+#include <cassert>
+
+#include "tiledb/sm/misc/constants.h"
+#include "tiledb/sm/misc/status.h"
+
 namespace tiledb {
 namespace sm {
 
 /** Defines the query states (used in asynchronous queries). */
-enum class QueryStatus : char {
+enum class QueryStatus : uint8_t {
 #define TILEDB_QUERY_STATUS_ENUM(id) id
 #include "tiledb/sm/c_api/tiledb_enum.h"
 #undef TILEDB_QUERY_STATUS_ENUM
 };
+
+/** Returns the string representation of the input querystatus type. */
+inline const std::string& query_status_str(QueryStatus query_status) {
+  switch (query_status) {
+    case QueryStatus::FAILED:
+      return constants::query_status_failed_str;
+    case QueryStatus::COMPLETED:
+      return constants::query_status_completed_str;
+    case QueryStatus::INPROGRESS:
+      return constants::query_status_inprogress_str;
+    case QueryStatus::INCOMPLETE:
+      return constants::query_status_incomplete_str;
+    case QueryStatus::UNINITIALIZED:
+      return constants::query_status_uninitialized_str;
+    default:
+      assert(0);
+      return constants::empty_str;
+  }
+}
+
+/** Returns the query status given a string representation. */
+inline Status query_status_enum(
+    const std::string& query_status_str, QueryStatus* query_status) {
+  if (query_status_str == constants::query_status_failed_str)
+    *query_status = QueryStatus::FAILED;
+  else if (query_status_str == constants::query_status_completed_str)
+    *query_status = QueryStatus::COMPLETED;
+  else if (query_status_str == constants::query_status_inprogress_str)
+    *query_status = QueryStatus::INPROGRESS;
+  else if (query_status_str == constants::query_status_incomplete_str)
+    *query_status = QueryStatus::INCOMPLETE;
+  else if (query_status_str == constants::query_status_uninitialized_str)
+    *query_status = QueryStatus::UNINITIALIZED;
+  else {
+    return Status::Error("Invalid QueryStatus " + query_status_str);
+  }
+  return Status::Ok();
+}
 
 }  // namespace sm
 }  // namespace tiledb

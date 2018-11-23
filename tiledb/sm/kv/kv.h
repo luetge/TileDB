@@ -33,14 +33,13 @@
 #ifndef TILEDB_KV_H
 #define TILEDB_KV_H
 
-#include "tiledb/sm/storage_manager/storage_manager.h"
-
 #include "tiledb/sm/buffer/buffer.h"
 #include "tiledb/sm/enums/array_type.h"
 #include "tiledb/sm/enums/datatype.h"
 #include "tiledb/sm/enums/query_type.h"
 #include "tiledb/sm/kv/kv_item.h"
 #include "tiledb/sm/misc/status.h"
+#include "tiledb/sm/storage_manager/storage_manager.h"
 
 #include <map>
 #include <mutex>
@@ -65,7 +64,7 @@ class KV {
   /* ********************************* */
 
   /** Constructor. */
-  explicit KV(StorageManager* storage_manager);
+  KV(const URI& kv_uri, StorageManager* storage_manager);
 
   /** Destructor. */
   ~KV();
@@ -81,13 +80,22 @@ class KV {
   uint64_t capacity() const;
 
   /**
-   * Returns `true` if the kv contains written unflushed items buffered
+   * Checks if the kv contains written unflushed items buffered
    * in main memory.
+   *
+   * @param dirty Set to `true` if the kv contains unflushed items.
+   * @return Status
    */
-  bool dirty() const;
+  Status is_dirty(bool* dirty) const;
 
   /** Flushes the buffered written items to persistent storage. */
   Status flush();
+
+  /**
+   * Returns the query type the kv was opened with (i.e., for reads or
+   * writes). It outputs an error if the kv is not open.
+   */
+  Status get_query_type(QueryType* query_type) const;
 
   /**
    * Gets a key-value item from the key-value store. This function first
@@ -125,42 +133,56 @@ class KV {
       const void* key, Datatype key_type, uint64_t key_size, bool* has_key);
 
   /**
-   * Initializes the key-value store for reading/writing.
+   * Opens the key-value store for reading/writing.
    *
-   * @param uri The URI of the key-value store.
-   * @param attributes The attributes of the key-value store schema to focus on.
-   *     Use an empty vector to indicate **all** attributes.
+   * @param query_type The mode in which the key-value store is opened.
+   * @param encryption_type The type of encryption.
+   * @param encryption_key If the array is encrypted, the private encryption
+   *    key. For unencrypted arrays, pass `nullptr`.
+   * @param key_length The length of the encryption key.
    * @return Status
-   *
-   * @note If the key-value store will be used for writes, `attributes` **must**
-   *     be empty, indicating that all attributes will participate in
-   *     the write.
    */
-  Status init(const URI& uri, const std::vector<std::string>& attributes);
-
-  /** Clears the key-value store. */
-  void clear();
+  Status open(
+      QueryType query_type,
+      EncryptionType encryption_type,
+      const void* encryption_key,
+      uint32_t key_length);
 
   /**
-   * Finalizes the key-value store and frees all memory. All buffered values
-   * will be flushed to persistent storage.
+   * Opens the key-value store for reading/writing at a given timestamp.
+   *
+   * @param query_type The mode in which the key-value store is opened.
+   * @param encryption_type The type of encryption.
+   * @param encryption_key If the array is encrypted, the private encryption
+   *    key. For unencrypted arrays, pass `nullptr`.
+   * @param key_length The length of the encryption key.
+   * @param timestamp The timestamp at which to open the array.
+   * @return Status
    */
-  Status finalize();
+  Status open_at(
+      QueryType query_type,
+      EncryptionType encryption_type,
+      const void* encryption_key,
+      uint32_t key_length,
+      uint64_t timestamp);
+
+  /** Closes the key-value store and frees all memory. */
+  Status close();
+
+  /** Returns `true` if the array is open. */
+  bool is_open() const;
 
   /** Re-opens the key-value store for reads. */
   Status reopen();
 
-  /** The open array used for dispatching read queries. */
-  OpenArray* open_array_for_reads() const;
+  /** Re-opens the key-value store for reads at a specific timestamp. */
+  Status reopen_at(uint64_t timestamp);
 
-  /** Sets the number of maximum written items buffered before being flushed. */
-  Status set_max_buffered_items(uint64_t max_items);
+  /** Returns the timestamp at which the KV was opened. */
+  uint64_t timestamp() const;
 
-  /**
-   * Returns the snapshot at which the underlying array got opened for
-   * reads.
-   */
-  uint64_t snapshot() const;
+  /** The open array used for dispatching read/write queries. */
+  Array* array() const;
 
  private:
   /* ********************************* */
@@ -176,11 +198,8 @@ class KV {
   /** These are the corresponding types of `attributes_`. */
   std::vector<Datatype> attribute_types_;
 
-  /** The array object that will receive the read queries. */
-  OpenArray* open_array_for_reads_;
-
-  /** The array object that will receive the write queries. */
-  OpenArray* open_array_for_writes_;
+  /** The array object that will receive the read or write queries. */
+  Array* array_;
 
   /**
    * Buffers to be used in read queries. This is a map from the
@@ -212,9 +231,6 @@ class KV {
   std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>
       read_buffer_alloced_sizes_;
 
-  /** The snapshot at which the `open_array_for_reads_` got opened. */
-  uint64_t snapshot_;
-
   /**
    * Buffers to be used in write queries. This is a map from the
    * attribute (or coordinates) name to a pair of buffers. For fixed-sized
@@ -232,24 +248,11 @@ class KV {
   std::unordered_map<std::string, std::pair<uint64_t, uint64_t>>
       write_buffer_sizes_;
 
-  /**
-   * `True` if the key-value store is good for writes. This happens when
-   * the user specifies `nullptr` for attributes in `open`, meaning that
-   * all attributes must be participate in the write.
-   */
-  bool write_good_;
-
   /** Items to be written to disk indexed on their hash. */
   std::map<KVItem::Hash, KVItem*> items_;
 
   /** The key-value URI.*/
   URI kv_uri_;
-
-  /** Maximum number of items to be buffered. */
-  uint64_t max_items_;
-
-  /** The key-value store schema. */
-  const ArraySchema* schema_;
 
   /** TileDB storage manager. */
   StorageManager* storage_manager_;
@@ -273,6 +276,9 @@ class KV {
    */
   Status add_value(const std::string& attribute, const KVItem::Value& value);
 
+  /** Clears the key-value store. */
+  void clear();
+
   /** Frees memory of items. */
   void clear_items();
 
@@ -284,6 +290,9 @@ class KV {
 
   /** Populates the write buffers with the buffered key-value items. */
   Status populate_write_buffers();
+
+  /** Initializations when opening the KV. */
+  void prepare_attributes_and_read_buffer_sizes();
 
   /**
    * Reads a key-value item from persistent storage and into the local

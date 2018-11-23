@@ -390,6 +390,38 @@ Other helpful build targets:
    repo path and restart the process, as ``cmake``'s cached state could present some
    unexpected problems.
 
+Cygwin
+~~~~~~
+
+`Cygwin <https://https://cygwin.com/>`_ is a Unix like environment and command line interface for
+Microsoft Windows that provides a large collection of GNU / OpenSource tools (including the gcc toolchain) and
+supporting libraries that provide substantial POSIX API functionality.
+TileDB is able to compile from source in the Cygwin environment if Intel TBB is disabled 
+and some TileDB dependencies are installed as Cygwin packages.
+
+The following Cygwin packages need to be installed:
+
+* ``gcc / g++``
+* ``git``
+* ``cmake``
+* ``make``
+* ``lz4-devel``
+* ``zlib-devel``
+* ``libzstd-devel (+src)``
+* ``bzip2 (+src)``
+* ``openssl-devel``
+
+You can then clone and build TileDB using git / cmake / make:
+
+.. code-block:: console
+
+   $ git clone https://github.com/TileDB-Inc/TileDB
+   $ cd TileDB && mkdir build && cd build
+   $ cmake -DTILEDB_TBB=OFF ..
+   $ make
+   $ make check
+
+
 Build Requirements
 ------------------
 
@@ -401,7 +433,6 @@ For compression, TileDB relies on the following libraries:
 * `LZ4 <http://lz4.github.io/lz4/>`_
 * `bzip2 <http://www.bzip.org/>`_
 * `Zstandard <http://facebook.github.io/zstd/>`_
-* `Blosc <http://blosc.org/pages/blosc-in-depth/>`_
 
 When building from source, TileDB will locate these dependencies if already
 installed on your system, and locally install (not system-wide) any of them

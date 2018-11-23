@@ -52,6 +52,14 @@ URI::URI() {
   uri_ = "";
 }
 
+URI::URI(char* path)
+    : URI((path == nullptr) ? std::string("") : std::string(path)) {
+}
+
+URI::URI(const char* path)
+    : URI((path == nullptr) ? std::string("") : std::string(path)) {
+}
+
 URI::URI(const std::string& path) {
   if (path.empty())
     uri_ = "";
@@ -93,32 +101,32 @@ bool URI::is_invalid() const {
 }
 
 bool URI::is_file(const std::string& path) {
-  return utils::starts_with(path, "file:///") ||
+  return utils::parse::starts_with(path, "file:///") ||
          path.find("://") == std::string::npos;
 }
 
 bool URI::is_file() const {
-  return utils::starts_with(uri_, "file:///");
+  return utils::parse::starts_with(uri_, "file:///");
 }
 
 bool URI::is_hdfs(const std::string& path) {
-  return utils::starts_with(path, "hdfs://");
+  return utils::parse::starts_with(path, "hdfs://");
 }
 
 bool URI::is_hdfs() const {
-  return utils::starts_with(uri_, "hdfs://");
+  return utils::parse::starts_with(uri_, "hdfs://");
 }
 
 bool URI::is_s3(const std::string& path) {
-  return utils::starts_with(path, "s3://") ||
-         utils::starts_with(path, "http://") ||
-         utils::starts_with(path, "https://");
+  return utils::parse::starts_with(path, "s3://") ||
+         utils::parse::starts_with(path, "http://") ||
+         utils::parse::starts_with(path, "https://");
 }
 
 bool URI::is_s3() const {
-  return utils::starts_with(uri_, "s3://") ||
-         utils::starts_with(uri_, "http://") ||
-         utils::starts_with(uri_, "https://");
+  return utils::parse::starts_with(uri_, "s3://") ||
+         utils::parse::starts_with(uri_, "http://") ||
+         utils::parse::starts_with(uri_, "https://");
 }
 
 URI URI::join_path(const std::string& path) const {
@@ -182,6 +190,14 @@ std::string URI::to_path() const {
 
 std::string URI::to_string() const {
   return uri_;
+}
+
+bool URI::operator<(const URI& uri) const {
+  return uri_ < uri.uri_;
+}
+
+bool URI::operator>(const URI& uri) const {
+  return uri_ > uri.uri_;
 }
 
 }  // namespace sm

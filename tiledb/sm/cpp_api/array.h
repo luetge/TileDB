@@ -87,13 +87,148 @@ class Array {
       const Context& ctx,
       const std::string& array_uri,
       tiledb_query_type_t query_type)
+      : Array(ctx, array_uri, query_type, TILEDB_NO_ENCRYPTION, nullptr, 0) {
+  }
+
+  /**
+   * Constructor. This opens an encrypted array for the given query type. The
+   * destructor calls the `close()` method.
+   *
+   * **Example:**
+   *
+   * @code{.cpp}
+   * // Open the encrypted array for reading
+   * tiledb::Context ctx;
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_READ,
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * @endcode
+   *
+   * @param ctx TileDB context.
+   * @param array_uri The array URI.
+   * @param query_type Query type to open the array for.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   */
+  Array(
+      const Context& ctx,
+      const std::string& array_uri,
+      tiledb_query_type_t query_type,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length)
       : ctx_(ctx)
-      , schema_(ArraySchema(ctx, (tiledb_array_schema_t*)nullptr))
-      , uri_(array_uri) {
+      , schema_(ArraySchema(ctx, (tiledb_array_schema_t*)nullptr)) {
     tiledb_array_t* array;
     ctx.handle_error(tiledb_array_alloc(ctx, array_uri.c_str(), &array));
     array_ = std::shared_ptr<tiledb_array_t>(array, deleter_);
-    ctx.handle_error(tiledb_array_open(ctx, array, query_type));
+    ctx.handle_error(tiledb_array_open_with_key(
+        ctx, array, query_type, encryption_type, encryption_key, key_length));
+
+    tiledb_array_schema_t* array_schema;
+    ctx.handle_error(tiledb_array_get_schema(ctx, array, &array_schema));
+    schema_ = ArraySchema(ctx, array_schema);
+  }
+
+  /**
+   * Constructor. This opens the array for the given query type. The
+   * destructor calls the `close()` method.
+   *
+   * This constructor takes as input a
+   * timestamp, representing time in milliseconds ellapsed since
+   * 1970-01-01 00:00:00 +0000 (UTC). Opening the array at a
+   * timestamp provides a view of the array with all writes/updates that
+   * happened at or before `timestamp` (i.e., excluding those that
+   * occurred after `timestamp`). This is useful to ensure
+   * consistency at a potential distributed setting, where machines
+   * need to operate on the same view of the array.
+   *
+   * **Example:**
+   *
+   * @code{.cpp}
+   * // Open the array for reading
+   * tiledb::Context ctx;
+   * // Get some `timestamp` here in milliseconds
+   * tiledb::Array array(
+   *     ctx, "s3://bucket-name/array-name", TILEDB_READ, timestamp);
+   * @endcode
+   *
+   * @param ctx TileDB context.
+   * @param array_uri The array URI.
+   * @param query_type Query type to open the array for.
+   * @param timestamp The timestamp to open the array at.
+   */
+  Array(
+      const Context& ctx,
+      const std::string& array_uri,
+      tiledb_query_type_t query_type,
+      uint64_t timestamp)
+      : Array(
+            ctx,
+            array_uri,
+            query_type,
+            TILEDB_NO_ENCRYPTION,
+            nullptr,
+            0,
+            timestamp) {
+  }
+
+  /**
+   * Constructor. This opens an encrypted array for the given query type. The
+   * destructor calls the `close()` method.
+   *
+   * This constructor takes as input a
+   * timestamp, representing time in milliseconds ellapsed since
+   * 1970-01-01 00:00:00 +0000 (UTC). Opening the array at a
+   * timestamp provides a view of the array with all writes/updates that
+   * happened at or before `timestamp` (i.e., excluding those that
+   * occurred after `timestamp`). This is useful to ensure
+   * consistency at a potential distributed setting, where machines
+   * need to operate on the same view of the array.
+   *
+   * **Example:**
+   *
+   * @code{.cpp}
+   * // Open the encrypted array for reading
+   * tiledb::Context ctx;
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * // Get some `timestamp` here in milliseconds
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_READ,
+   *    TILEDB_AES_256_GCM, key, sizeof(key), timestamp);
+   * @endcode
+   *
+   * @param ctx TileDB context.
+   * @param array_uri The array URI.
+   * @param query_type Query type to open the array for.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   * @param timestamp The timestamp to open the array at.
+   */
+  Array(
+      const Context& ctx,
+      const std::string& array_uri,
+      tiledb_query_type_t query_type,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length,
+      uint64_t timestamp)
+      : ctx_(ctx)
+      , schema_(ArraySchema(ctx, (tiledb_array_schema_t*)nullptr)) {
+    tiledb_array_t* array;
+    ctx.handle_error(tiledb_array_alloc(ctx, array_uri.c_str(), &array));
+    array_ = std::shared_ptr<tiledb_array_t>(array, deleter_);
+    ctx.handle_error(tiledb_array_open_at_with_key(
+        ctx,
+        array,
+        query_type,
+        encryption_type,
+        encryption_key,
+        key_length,
+        timestamp));
 
     tiledb_array_schema_t* array_schema;
     ctx.handle_error(tiledb_array_get_schema(ctx, array, &array_schema));
@@ -101,9 +236,9 @@ class Array {
   }
 
   Array(const Array&) = default;
-  Array(Array&& array) = default;
+  Array(Array&&) = default;
   Array& operator=(const Array&) = default;
-  Array& operator=(Array&& o) = default;
+  Array& operator=(Array&&) = default;
 
   /** Destructor; calls `close()`. */
   ~Array() {
@@ -120,7 +255,10 @@ class Array {
 
   /** Returns the array URI. */
   std::string uri() const {
-    return uri_;
+    auto& ctx = ctx_.get();
+    const char* uri = nullptr;
+    ctx.handle_error(tiledb_array_get_uri(ctx, array_.get(), &uri));
+    return std::string(uri);
   }
 
   /** Get the ArraySchema for the array. **/
@@ -166,8 +304,132 @@ class Array {
    * @throws TileDBError if the array is already open or other error occurred.
    */
   void open(tiledb_query_type_t query_type) {
+    open(query_type, TILEDB_NO_ENCRYPTION, nullptr, 0);
+  }
+
+  /**
+   * Opens the array, for encrypted arrays.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * // Open the encrypted array for writing
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_WRITE,
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * // Close and open again for reading.
+   * array.close();
+   * array.open(TILEDB_READ, TILEDB_AES_256_GCM, key, sizeof(key));
+   * @endcode
+   *
+   * @param query_type The type of queries the array object will be receiving.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   */
+  void open(
+      tiledb_query_type_t query_type,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length) {
     auto& ctx = ctx_.get();
-    ctx.handle_error(tiledb_array_open(ctx, array_.get(), query_type));
+    ctx.handle_error(tiledb_array_open_with_key(
+        ctx,
+        array_.get(),
+        query_type,
+        encryption_type,
+        encryption_key,
+        key_length));
+    tiledb_array_schema_t* array_schema;
+    ctx.handle_error(tiledb_array_get_schema(ctx, array_.get(), &array_schema));
+    schema_ = ArraySchema(ctx, array_schema);
+  }
+
+  /**
+   * Opens the array. The array is opened using a query type as input.
+   * This is to indicate that queries created for this `Array`
+   * object will inherit the query type. In other words, `Array`
+   * objects are opened to receive only one type of queries.
+   * They can always be closed and be re-opened with another query type.
+   * Also there may be many different `Array`
+   * objects created and opened with different query types. For
+   * instance, one may create and open an array object `array_read` for
+   * reads and another one `array_write` for writes, and interleave
+   * creation and submission of queries for both these array objects.
+   *
+   * This function takes as input a
+   * timestamp, representing time in milliseconds ellapsed since
+   * 1970-01-01 00:00:00 +0000 (UTC). Opening the array at a
+   * timestamp provides a view of the array with all writes/updates that
+   * happened at or before `timestamp` (i.e., excluding those that
+   * occurred after `timestamp`). This is useful to ensure
+   * consistency at a potential distributed setting, where machines
+   * need to operate on the same view of the array.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Open the array for writing
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_WRITE);
+   * // Close and open again for reading.
+   * array.close();
+   * // Get some `timestamp` in milliseconds here
+   * array.open(TILEDB_READ, timestamp);
+   * @endcode
+   *
+   * @param query_type The type of queries the array object will be receiving.
+   * @param timestamp The timestamp to open the array at.
+   * @throws TileDBError if the array is already open or other error occurred.
+   */
+  void open(tiledb_query_type_t query_type, uint64_t timestamp) {
+    open(query_type, TILEDB_NO_ENCRYPTION, nullptr, 0, timestamp);
+  }
+
+  /**
+   * Opens the array, for encrypted arrays.
+   *
+   * This function takes as input a
+   * timestamp, representing time in milliseconds ellapsed since
+   * 1970-01-01 00:00:00 +0000 (UTC). Opening the array at a
+   * timestamp provides a view of the array with all writes/updates that
+   * happened at or before `timestamp` (i.e., excluding those that
+   * occurred after `timestamp`). This is useful to ensure
+   * consistency at a potential distributed setting, where machines
+   * need to operate on the same view of the array.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * // Open the encrypted array for writing
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_WRITE,
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * // Close and open again for reading.
+   * array.close();
+   * // Get some `timestamp` in milliseconds here
+   * array.open(TILEDB_READ, TILEDB_AES_256_GCM, key, sizeof(key), timestamp);
+   * @endcode
+   *
+   * @param query_type The type of queries the array object will be receiving.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   * @param timestamp The timestamp to open the array at.
+   */
+  void open(
+      tiledb_query_type_t query_type,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length,
+      uint64_t timestamp) {
+    auto& ctx = ctx_.get();
+    ctx.handle_error(tiledb_array_open_at_with_key(
+        ctx,
+        array_.get(),
+        query_type,
+        encryption_type,
+        encryption_key,
+        key_length,
+        timestamp));
     tiledb_array_schema_t* array_schema;
     ctx.handle_error(tiledb_array_get_schema(ctx, array_.get(), &array_schema));
     schema_ = ArraySchema(ctx, array_schema);
@@ -180,6 +442,8 @@ class Array {
    * close the array and open with `open()`, or just use
    * `reopen()` without closing. This function will be generally
    * faster than the former alternative.
+   *
+   * Note: reopening encrypted arrays does not require the encryption key.
    *
    * **Example:**
    * @code{.cpp}
@@ -197,6 +461,36 @@ class Array {
     tiledb_array_schema_t* array_schema;
     ctx.handle_error(tiledb_array_get_schema(ctx, array_.get(), &array_schema));
     schema_ = ArraySchema(ctx, array_schema);
+  }
+
+  /**
+   * Reopens the array at a specific timestamp.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Open the array for reading
+   * tiledb::Array array(ctx, "s3://bucket-name/array-name", TILEDB_READ);
+   * uint64_t timestamp = tiledb_timestamp_now_ms();
+   * array.reopen_at(timestamp);
+   * @endcode
+   *
+   * @throws TileDBError if the array was not already open or other error
+   * occurred.
+   */
+  void reopen_at(uint64_t timestamp) {
+    auto& ctx = ctx_.get();
+    ctx.handle_error(tiledb_array_reopen_at(ctx, array_.get(), timestamp));
+    tiledb_array_schema_t* array_schema;
+    ctx.handle_error(tiledb_array_get_schema(ctx, array_.get(), &array_schema));
+    schema_ = ArraySchema(ctx, array_schema);
+  }
+
+  /** Returns the timestamp at which the array was opened. */
+  uint64_t timestamp() const {
+    auto& ctx = ctx_.get();
+    uint64_t timestamp;
+    ctx.handle_error(tiledb_array_get_timestamp(ctx, array_.get(), &timestamp));
+    return timestamp;
   }
 
   /**
@@ -229,7 +523,38 @@ class Array {
    * @param array_uri The URI of the TileDB array to be consolidated.
    */
   static void consolidate(const Context& ctx, const std::string& uri) {
-    ctx.handle_error(tiledb_array_consolidate(ctx, uri.c_str()));
+    consolidate(ctx, uri, TILEDB_NO_ENCRYPTION, nullptr, 0);
+  }
+
+  /**
+   * Consolidates the fragments of an encrypted array into a single fragment.
+   *
+   * You must first finalize all queries to the array before consolidation can
+   * begin (as consolidation temporarily acquires an exclusive lock on the
+   * array).
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * tiledb::Array::consolidate(ctx, "s3://bucket-name/array-name",
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * @endcode
+   *
+   * @param ctx TileDB context
+   * @param array_uri The URI of the TileDB array to be consolidated.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   */
+  static void consolidate(
+      const Context& ctx,
+      const std::string& uri,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length) {
+    ctx.handle_error(tiledb_array_consolidate_with_key(
+        ctx, uri.c_str(), encryption_type, encryption_key, key_length));
   }
 
   /**
@@ -244,9 +569,36 @@ class Array {
    * @param schema The array schema.
    */
   static void create(const std::string& uri, const ArraySchema& schema) {
+    create(uri, schema, TILEDB_NO_ENCRYPTION, nullptr, 0);
+  }
+
+  /**
+   * Creates a new encrypted TileDB array given an input schema.
+   *
+   * **Example:**
+   * @code{.cpp}
+   * // Load AES-256 key from disk, environment variable, etc.
+   * uint8_t key[32] = ...;
+   * tiledb::Array::create("s3://bucket-name/array-name", schema,
+   *    TILEDB_AES_256_GCM, key, sizeof(key));
+   * @endcode
+   *
+   * @param uri URI where array will be created.
+   * @param schema The array schema.
+   * @param encryption_type The encryption type to use.
+   * @param encryption_key The encryption key to use.
+   * @param key_length Length in bytes of the encryption key.
+   */
+  static void create(
+      const std::string& uri,
+      const ArraySchema& schema,
+      tiledb_encryption_type_t encryption_type,
+      const void* encryption_key,
+      uint32_t key_length) {
     auto& ctx = schema.context();
     ctx.handle_error(tiledb_array_schema_check(ctx, schema));
-    ctx.handle_error(tiledb_array_create(ctx, uri.c_str(), schema));
+    ctx.handle_error(tiledb_array_create_with_key(
+        ctx, uri.c_str(), schema, encryption_type, encryption_key, key_length));
   }
 
   /**
@@ -396,9 +748,6 @@ class Array {
 
   /** The array schema. */
   ArraySchema schema_;
-
-  /** The array URI. */
-  std::string uri_;
 
   /* ********************************* */
   /*          PRIVATE METHODS          */

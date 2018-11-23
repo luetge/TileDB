@@ -57,9 +57,14 @@ class FragmentMetadata {
    * @param array_schema The schema of the array the fragment belongs to.
    * @param dense Indicates whether the fragment is dense or sparse.
    * @param fragment_uri The fragment URI.
+   * @param timestamp The timestamp of the fragment creation. In TileDB,
+   * timestamps are in ms elapsed since 1970-01-01 00:00:00 +0000 (UTC).
    */
   FragmentMetadata(
-      const ArraySchema* array_schema, bool dense, const URI& fragment_uri);
+      const ArraySchema* array_schema,
+      bool dense,
+      const URI& fragment_uri,
+      uint64_t timestamp);
 
   /** Destructor. */
   ~FragmentMetadata();
@@ -214,6 +219,9 @@ class FragmentMetadata {
 
   /** Returns the size of the input variable attribute. */
   uint64_t file_var_sizes(const std::string& attribute) const;
+
+  /** Returns the format version of this fragment. */
+  uint32_t format_version() const;
 
   /** Returns the fragment URI. */
   const URI& fragment_uri() const;
@@ -385,26 +393,27 @@ class FragmentMetadata {
       const std::string& attribute, uint64_t tile_idx) const;
 
   /**
-   * Returns the compressed tile size for a given attribute
-   * and tile index. If the attribute is var-sized, this will return
-   * the size of the offsets tile.
+   * Returns the size of the tile when it is persisted (e.g. the size of the
+   * compressed tile on disk) for a given attribute and tile index. If the
+   * attribute is var-sized, this will return the persisted size of the offsets
+   * tile.
    *
    * @param attribute The input attribute.
    * @param tile_idx The index of the tile in the metadata.
    * @return The tile size.
    */
-  uint64_t compressed_tile_size(
+  uint64_t persisted_tile_size(
       const std::string& attribute, uint64_t tile_idx) const;
 
   /**
-   * Returns the compressed tile size for a given var-sized attribute
-   * and tile index.
+   * Returns the size of the tile when it is persisted (e.g. the size of the
+   * compressed tile on disk) for a given var-sized attribute and tile index.
    *
    * @param attribute The inout attribute.
    * @param tile_idx The index of the tile in the metadata.
    * @return The tile size.
    */
-  uint64_t compressed_tile_var_size(
+  uint64_t persisted_tile_var_size(
       const std::string& attribute, uint64_t tile_idx) const;
 
   /**
@@ -427,6 +436,15 @@ class FragmentMetadata {
    * @return The tile size.
    */
   uint64_t tile_var_size(const std::string& attribute, uint64_t tile_idx) const;
+
+  /** The creation timestamp of the fragment. */
+  uint64_t timestamp() const;
+
+  /**
+   * Returns `true` if the timestamp of the first operand is smaller,
+   * breaking ties based on the URI string.
+   */
+  bool operator<(const FragmentMetadata& metadata) const;
 
  private:
   /* ********************************* */
@@ -510,8 +528,11 @@ class FragmentMetadata {
    */
   std::vector<std::vector<uint64_t>> tile_var_sizes_;
 
-  /** The version of the library that created this metadata. */
-  int version_[3];
+  /** The format version of this metadata. */
+  uint32_t version_;
+
+  /** The creation timestamp of the fragment. */
+  uint64_t timestamp_;
 
   /* ********************************* */
   /*           PRIVATE METHODS         */
@@ -613,7 +634,7 @@ class FragmentMetadata {
    */
   Status load_tile_var_sizes(ConstBuffer* buff);
 
-  /** Loads the library version from the buffer. */
+  /** Loads the format version from the buffer. */
   Status load_version(ConstBuffer* buff);
 
   /**
@@ -678,7 +699,7 @@ class FragmentMetadata {
    */
   Status write_tile_var_sizes(Buffer* buff);
 
-  /** Writes the library version to the buffer. */
+  /** Writes the format version to the buffer. */
   Status write_version(Buffer* buff);
 };
 

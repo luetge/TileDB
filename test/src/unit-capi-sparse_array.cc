@@ -40,6 +40,8 @@
 #include "tiledb/sm/c_api/tiledb.h"
 #include "tiledb/sm/misc/utils.h"
 
+#include "test/src/helpers.h"
+
 #include <cassert>
 #include <cstring>
 #include <ctime>
@@ -72,6 +74,9 @@ struct SparseArrayFx {
 #endif
   int ITER_NUM = 5;
   const std::string ARRAY = "sparse_array";
+
+  tiledb_encryption_type_t encryption_type = TILEDB_NO_ENCRYPTION;
+  const char* encryption_key = nullptr;
 
   // TileDB context
   tiledb_ctx_t* ctx_;
@@ -107,13 +112,14 @@ struct SparseArrayFx {
   void check_invalid_offsets(const std::string& array_name);
   void write_partial_sparse_array(const std::string& array_name);
   void write_sparse_array_missing_attributes(const std::string& array_name);
+  void write_sparse_array(const std::string& array_name);
   void set_supported_fs();
   void create_temp_dir(const std::string& path);
   void remove_temp_dir(const std::string& path);
   static std::string random_bucket_name(const std::string& prefix);
   void check_sorted_reads(
       const std::string& array_name,
-      tiledb_compressor_t compressor,
+      tiledb_filter_type_t compressor,
       tiledb_layout_t tile_order,
       tiledb_layout_t cell_order);
 
@@ -140,7 +146,7 @@ struct SparseArrayFx {
       const int64_t domain_1_lo,
       const int64_t domain_1_hi,
       const uint64_t capacity,
-      const tiledb_compressor_t compressor,
+      const tiledb_filter_type_t compressor,
       const tiledb_layout_t cell_order,
       const tiledb_layout_t tile_order);
 
@@ -293,7 +299,7 @@ void SparseArrayFx::remove_temp_dir(const std::string& path) {
 std::string SparseArrayFx::random_bucket_name(const std::string& prefix) {
   std::stringstream ss;
   ss << prefix << "-" << std::this_thread::get_id() << "-"
-     << tiledb::sm::utils::timestamp_ms();
+     << TILEDB_TIMESTAMP_NOW_MS;
   return ss.str();
 }
 
@@ -306,7 +312,7 @@ void SparseArrayFx::create_sparse_array_2D(
     const int64_t domain_1_lo,
     const int64_t domain_1_hi,
     const uint64_t capacity,
-    const tiledb_compressor_t compressor,
+    const tiledb_filter_type_t compressor,
     const tiledb_layout_t cell_order,
     const tiledb_layout_t tile_order) {
   // Prepare and set the array schema object and data structures
@@ -316,8 +322,22 @@ void SparseArrayFx::create_sparse_array_2D(
   tiledb_attribute_t* a;
   int rc = tiledb_attribute_alloc(ctx_, ATTR_NAME.c_str(), ATTR_TYPE, &a);
   REQUIRE(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a, compressor, COMPRESSION_LEVEL);
-  REQUIRE(rc == TILEDB_OK);
+
+  tiledb_filter_t* filter;
+  tiledb_filter_list_t* list;
+  rc = tiledb_filter_alloc(ctx_, compressor, &filter);
+  CHECK(rc == TILEDB_OK);
+  if (compressor != TILEDB_FILTER_NONE) {
+    rc = tiledb_filter_set_option(
+        ctx_, filter, TILEDB_COMPRESSION_LEVEL, &COMPRESSION_LEVEL);
+    CHECK(rc == TILEDB_OK);
+  }
+  rc = tiledb_filter_list_alloc(ctx_, &list);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_filter_list_add_filter(ctx_, list, filter);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_attribute_set_filter_list(ctx_, a, list);
+  CHECK(rc == TILEDB_OK);
 
   // Create dimensions
   tiledb_dimension_t* d1;
@@ -353,8 +373,18 @@ void SparseArrayFx::create_sparse_array_2D(
   rc = tiledb_array_schema_set_domain(ctx_, array_schema, domain);
   REQUIRE(rc == TILEDB_OK);
 
-  // Create the array schema
-  rc = tiledb_array_create(ctx_, array_name.c_str(), array_schema);
+  // Create the array
+  if (encryption_type == TILEDB_NO_ENCRYPTION) {
+    rc = tiledb_array_create(ctx_, array_name.c_str(), array_schema);
+  } else {
+    rc = tiledb_array_create_with_key(
+        ctx_,
+        array_name.c_str(),
+        array_schema,
+        encryption_type,
+        encryption_key,
+        (uint32_t)strlen(encryption_key));
+  }
   REQUIRE(rc == TILEDB_OK);
 
   // Clean up
@@ -381,8 +411,19 @@ int* SparseArrayFx::read_sparse_array_2D(
   tiledb_array_t* array;
   int rc = tiledb_array_alloc(ctx_, array_name.c_str(), &array);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_array_open(ctx_, array, query_type);
-  CHECK(rc == TILEDB_OK);
+  if (encryption_type == TILEDB_NO_ENCRYPTION) {
+    rc = tiledb_array_open(ctx_, array, query_type);
+    CHECK(rc == TILEDB_OK);
+  } else {
+    rc = tiledb_array_open_with_key(
+        ctx_,
+        array,
+        query_type,
+        encryption_type,
+        encryption_key,
+        (uint32_t)strlen(encryption_key));
+    CHECK(rc == TILEDB_OK);
+  }
 
   // Prepare the buffers that will store the result
   uint64_t buffer_size;
@@ -431,6 +472,87 @@ int* SparseArrayFx::read_sparse_array_2D(
   return buffer;
 }
 
+void SparseArrayFx::write_sparse_array(const std::string& array_name) {
+  // Prepare cell buffers
+  int buffer_a1[] = {0, 1, 2, 3, 4, 5, 6, 7};
+  uint64_t buffer_a2[] = {0, 1, 3, 6, 10, 11, 13, 16};
+  char buffer_var_a2[] = "abbcccddddeffggghhhh";
+  float buffer_a3[] = {0.1f,
+                       0.2f,
+                       1.1f,
+                       1.2f,
+                       2.1f,
+                       2.2f,
+                       3.1f,
+                       3.2f,
+                       4.1f,
+                       4.2f,
+                       5.1f,
+                       5.2f,
+                       6.1f,
+                       6.2f,
+                       7.1f,
+                       7.2f};
+  uint64_t buffer_coords[] = {1, 1, 1, 2, 1, 4, 2, 3, 3, 1, 4, 2, 3, 3, 3, 4};
+  void* buffers[] = {
+      buffer_a1, buffer_a2, buffer_var_a2, buffer_a3, buffer_coords};
+  uint64_t buffer_sizes[] = {
+      sizeof(buffer_a1),
+      sizeof(buffer_a2),
+      sizeof(buffer_var_a2) - 1,  // No need to store the last '\0' character
+      sizeof(buffer_a3),
+      sizeof(buffer_coords)};
+
+  // Open array
+  tiledb_array_t* array;
+  int rc = tiledb_array_alloc(ctx_, array_name.c_str(), &array);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_open(ctx_, array, TILEDB_WRITE);
+  CHECK(rc == TILEDB_OK);
+
+  // Create query
+  tiledb_query_t* query;
+  const char* attributes[] = {"a1", "a2", "a3", TILEDB_COORDS};
+  rc = tiledb_query_alloc(ctx_, array, TILEDB_WRITE, &query);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx_, query, TILEDB_GLOBAL_ORDER);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer(
+      ctx_, query, attributes[0], buffers[0], &buffer_sizes[0]);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer_var(
+      ctx_,
+      query,
+      attributes[1],
+      (uint64_t*)buffers[1],
+      &buffer_sizes[1],
+      buffers[2],
+      &buffer_sizes[2]);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer(
+      ctx_, query, attributes[2], buffers[3], &buffer_sizes[3]);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_buffer(
+      ctx_, query, attributes[3], buffers[4], &buffer_sizes[4]);
+  CHECK(rc == TILEDB_OK);
+
+  // Submit query
+  rc = tiledb_query_submit(ctx_, query);
+  CHECK(rc == TILEDB_OK);
+
+  // Finalize query
+  rc = tiledb_query_finalize(ctx_, query);
+  CHECK(rc == TILEDB_OK);
+
+  // Close array
+  rc = tiledb_array_close(ctx_, array);
+  CHECK(rc == TILEDB_OK);
+
+  // Clean up
+  tiledb_array_free(&array);
+  tiledb_query_free(&query);
+}
+
 void SparseArrayFx::write_sparse_array_unsorted_2D(
     const std::string& array_name,
     const int64_t domain_size_0,
@@ -462,8 +584,19 @@ void SparseArrayFx::write_sparse_array_unsorted_2D(
   tiledb_array_t* array;
   int rc = tiledb_array_alloc(ctx_, array_name.c_str(), &array);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_array_open(ctx_, array, TILEDB_WRITE);
-  CHECK(rc == TILEDB_OK);
+  if (encryption_type == TILEDB_NO_ENCRYPTION) {
+    rc = tiledb_array_open(ctx_, array, TILEDB_WRITE);
+    CHECK(rc == TILEDB_OK);
+  } else {
+    rc = tiledb_array_open_with_key(
+        ctx_,
+        array,
+        TILEDB_WRITE,
+        encryption_type,
+        encryption_key,
+        (uint32_t)strlen(encryption_key));
+    CHECK(rc == TILEDB_OK);
+  }
 
   // Create query
   tiledb_query_t* query;
@@ -551,7 +684,7 @@ void SparseArrayFx::test_random_subarrays(
 
 void SparseArrayFx::check_sorted_reads(
     const std::string& array_name,
-    tiledb_compressor_t compressor,
+    tiledb_filter_type_t compressor,
     tiledb_layout_t tile_order,
     tiledb_layout_t cell_order) {
   // Parameters used in this test
@@ -564,7 +697,7 @@ void SparseArrayFx::check_sorted_reads(
   int64_t domain_1_lo = 0;
   int64_t domain_1_hi = domain_size_1 - 1;
   int64_t capacity = 100000;
-  int iter_num = (compressor != TILEDB_BZIP2) ? ITER_NUM : 1;
+  int iter_num = (compressor != TILEDB_FILTER_BZIP2) ? ITER_NUM : 1;
 
   create_sparse_array_2D(
       array_name,
@@ -607,20 +740,20 @@ void SparseArrayFx::create_sparse_array(const std::string& array_name) {
   tiledb_attribute_t* a1;
   rc = tiledb_attribute_alloc(ctx_, "a1", TILEDB_INT32, &a1);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a1, TILEDB_BLOSC_LZ, -1);
+  rc = set_attribute_compression_filter(ctx_, a1, TILEDB_FILTER_LZ4, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a1, 1);
   CHECK(rc == TILEDB_OK);
   tiledb_attribute_t* a2;
   rc = tiledb_attribute_alloc(ctx_, "a2", TILEDB_CHAR, &a2);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a2, TILEDB_GZIP, -1);
+  rc = set_attribute_compression_filter(ctx_, a2, TILEDB_FILTER_GZIP, -1);
   CHECK(rc == TILEDB_OK);
   tiledb_attribute_set_cell_val_num(ctx_, a2, TILEDB_VAR_NUM);
   tiledb_attribute_t* a3;
   rc = tiledb_attribute_alloc(ctx_, "a3", TILEDB_FLOAT32, &a3);
   CHECK(rc == TILEDB_OK);
-  rc = tiledb_attribute_set_compressor(ctx_, a3, TILEDB_ZSTD, -1);
+  rc = set_attribute_compression_filter(ctx_, a3, TILEDB_FILTER_ZSTD, -1);
   CHECK(rc == TILEDB_OK);
   rc = tiledb_attribute_set_cell_val_num(ctx_, a3, 2);
   CHECK(rc == TILEDB_OK);
@@ -1995,26 +2128,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     }
   }
 
@@ -2023,26 +2147,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_COL_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_COL_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_COL_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2051,26 +2166,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name,
-          TILEDB_NO_COMPRESSION,
-          TILEDB_ROW_MAJOR,
-          TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2079,17 +2185,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     }
   }
 
@@ -2098,17 +2204,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_COL_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
     }
   }
 
@@ -2117,36 +2223,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
-    }
-  }
-
-  SECTION("- blosc compression, row/col-major") {
-    if (supports_s3_) {
-      // S3
-      array_name = S3_TEMP_DIR + ARRAY;
-      check_sorted_reads(
-          array_name, TILEDB_BLOSC_LZ, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
-    } else if (supports_hdfs_) {
-      // HDFS
-      array_name = HDFS_TEMP_DIR + ARRAY;
-      check_sorted_reads(
-          array_name, TILEDB_BLOSC_LZ, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
-    } else {
-      // File
-      array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
-      check_sorted_reads(
-          array_name, TILEDB_BLOSC_LZ, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_GZIP, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2155,17 +2242,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2174,17 +2261,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_LZ4, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2193,17 +2280,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_RLE, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2212,17 +2299,17 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name, TILEDB_FILTER_ZSTD, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
     }
   }
 
@@ -2231,17 +2318,26 @@ TEST_CASE_METHOD(
       // S3
       array_name = S3_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_DOUBLE_DELTA, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name,
+          TILEDB_FILTER_DOUBLE_DELTA,
+          TILEDB_ROW_MAJOR,
+          TILEDB_COL_MAJOR);
     } else if (supports_hdfs_) {
       // HDFS
       array_name = HDFS_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_DOUBLE_DELTA, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name,
+          TILEDB_FILTER_DOUBLE_DELTA,
+          TILEDB_ROW_MAJOR,
+          TILEDB_COL_MAJOR);
     } else {
       // File
       array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
       check_sorted_reads(
-          array_name, TILEDB_DOUBLE_DELTA, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+          array_name,
+          TILEDB_FILTER_DOUBLE_DELTA,
+          TILEDB_ROW_MAJOR,
+          TILEDB_COL_MAJOR);
     }
   }
 }
@@ -2312,7 +2408,7 @@ TEST_CASE_METHOD(
   ATTR_NAME = "";
   std::string array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + "anon_attr";
   check_sorted_reads(
-      array_name, TILEDB_NO_COMPRESSION, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
+      array_name, TILEDB_FILTER_NONE, TILEDB_ROW_MAJOR, TILEDB_ROW_MAJOR);
 }
 
 TEST_CASE_METHOD(
@@ -2436,4 +2532,180 @@ TEST_CASE_METHOD(
   tiledb_query_free(&query);
   tiledb_array_free(&array);
   tiledb_ctx_free(&ctx);
+}
+TEST_CASE_METHOD(
+    SparseArrayFx,
+    "C API: Test sparse array, invalidate cached max buffer sizes",
+    "[capi], [sparse], [sparse-invalidate-max-sizes]") {
+  std::string array_name =
+      FILE_URI_PREFIX + FILE_TEMP_DIR + "sparse_invalidate_max_sizes";
+  create_sparse_array(array_name);
+  write_sparse_array(array_name);
+
+  // Create TileDB context
+  tiledb_ctx_t* ctx = nullptr;
+  REQUIRE(tiledb_ctx_alloc(nullptr, &ctx) == TILEDB_OK);
+
+  // Open array
+  tiledb_array_t* array;
+  int rc = tiledb_array_alloc(ctx, array_name.c_str(), &array);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_open(ctx, array, TILEDB_READ);
+  CHECK(rc == TILEDB_OK);
+
+  // ---- First READ query (empty)
+  tiledb_query_t* empty_query;
+  rc = tiledb_query_alloc(ctx, array, TILEDB_READ, &empty_query);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx, empty_query, TILEDB_ROW_MAJOR);
+  CHECK(rc == TILEDB_OK);
+
+  // Get max buffer sizes for empty query
+  uint64_t subarray[] = {1, 1, 3, 3};
+  uint64_t a1_size, a2_off_size, a2_size, a3_size, coords_size;
+  rc = tiledb_array_max_buffer_size(ctx_, array, "a1", subarray, &a1_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size_var(
+      ctx_, array, "a2", subarray, &a2_off_size, &a2_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size(ctx_, array, "a3", subarray, &a3_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size(
+      ctx_, array, TILEDB_COORDS, subarray, &coords_size);
+  CHECK(rc == TILEDB_OK);
+
+  // Set attribute buffers
+  auto a1 = (int*)malloc(a1_size);
+  rc = tiledb_query_set_buffer(ctx, empty_query, "a1", a1, &a1_size);
+  CHECK(rc == TILEDB_OK);
+  auto a2_off = (uint64_t*)malloc(a2_off_size);
+  auto a2 = (char*)malloc(a2_size);
+  rc = tiledb_query_set_buffer_var(
+      ctx, empty_query, "a2", a2_off, &a2_off_size, a2, &a2_size);
+  CHECK(rc == TILEDB_OK);
+  auto a3 = (float*)malloc(a3_size);
+  rc = tiledb_query_set_buffer(ctx, empty_query, "a3", a3, &a3_size);
+  CHECK(rc == TILEDB_OK);
+  auto coords = (uint64_t*)malloc(coords_size);
+  rc = tiledb_query_set_buffer(
+      ctx, empty_query, TILEDB_COORDS, coords, &coords_size);
+  CHECK(rc == TILEDB_OK);
+
+  // Set subarray
+  rc = tiledb_query_set_subarray(ctx_, empty_query, subarray);
+  CHECK(rc == TILEDB_OK);
+
+  // Submit query
+  CHECK(tiledb_query_submit(ctx, empty_query) == TILEDB_OK);
+
+  // Check that there are no results
+  CHECK(a1_size == 0);
+  CHECK(a2_off_size == 0);
+  CHECK(a2_size == 0);
+  CHECK(a3_size == 0);
+
+  // Clean up
+  free(a1);
+  free(a2_off);
+  free(a2);
+  free(a3);
+  tiledb_query_free(&empty_query);
+
+  // ---- Second READ query (non-empty)
+  tiledb_query_t* query;
+  rc = tiledb_query_alloc(ctx, array, TILEDB_READ, &query);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_query_set_layout(ctx, query, TILEDB_ROW_MAJOR);
+  CHECK(rc == TILEDB_OK);
+
+  // Get max buffer sizes for non-empty query
+  uint64_t subarray_2[] = {1, 1, 1, 2};
+  rc = tiledb_array_max_buffer_size(ctx_, array, "a1", subarray_2, &a1_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size_var(
+      ctx_, array, "a2", subarray_2, &a2_off_size, &a2_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size(ctx_, array, "a3", subarray_2, &a3_size);
+  CHECK(rc == TILEDB_OK);
+  rc = tiledb_array_max_buffer_size(
+      ctx_, array, TILEDB_COORDS, subarray_2, &coords_size);
+  CHECK(rc == TILEDB_OK);
+
+  // Set attribute buffers
+  a1 = (int*)malloc(a1_size);
+  rc = tiledb_query_set_buffer(ctx, query, "a1", a1, &a1_size);
+  CHECK(rc == TILEDB_OK);
+  a2_off = (uint64_t*)malloc(a2_off_size);
+  a2 = (char*)malloc(a2_size);
+  rc = tiledb_query_set_buffer_var(
+      ctx, query, "a2", a2_off, &a2_off_size, a2, &a2_size);
+  CHECK(rc == TILEDB_OK);
+  a3 = (float*)malloc(a3_size);
+  rc = tiledb_query_set_buffer(ctx, query, "a3", a3, &a3_size);
+  CHECK(rc == TILEDB_OK);
+  coords = (uint64_t*)malloc(coords_size);
+  rc = tiledb_query_set_buffer(ctx, query, TILEDB_COORDS, coords, &coords_size);
+  CHECK(rc == TILEDB_OK);
+
+  // Set subarray
+  rc = tiledb_query_set_subarray(ctx_, query, subarray_2);
+  CHECK(rc == TILEDB_OK);
+
+  // Submit query
+  CHECK(tiledb_query_submit(ctx, query) == TILEDB_OK);
+
+  // Check that there are no results
+  REQUIRE(a1_size == 2 * sizeof(int));
+  REQUIRE(a2_off_size == 2 * sizeof(uint64_t));
+  REQUIRE(a2_size == 3 * sizeof(char));
+  REQUIRE(a3_size == 4 * sizeof(float));
+  CHECK(a1[0] == 0);
+  CHECK(a1[1] == 1);
+  CHECK(a2_off[0] == 0);
+  CHECK(a2_off[1] == 1);
+  CHECK(a2[0] == 'a');
+  CHECK(a2[1] == 'b');
+  CHECK(a2[2] == 'b');
+  CHECK(a3[0] == 0.1f);
+  CHECK(a3[1] == 0.2f);
+  CHECK(a3[2] == 1.1f);
+  CHECK(a3[3] == 1.2f);
+
+  // Clean up
+  free(a1);
+  free(a2_off);
+  free(a2);
+  free(a3);
+  tiledb_query_free(&query);
+
+  // Clean up
+  CHECK(tiledb_array_close(ctx, array) == TILEDB_OK);
+  tiledb_array_free(&array);
+  tiledb_ctx_free(&ctx);
+}
+
+TEST_CASE_METHOD(
+    SparseArrayFx,
+    "C API: Test sparse array, encrypted",
+    "[capi], [sparse], [encryption]") {
+  std::string array_name;
+  encryption_type = TILEDB_AES_256_GCM;
+  encryption_key = "0123456789abcdeF0123456789abcdeF";
+
+  if (supports_s3_) {
+    // S3
+    array_name = S3_TEMP_DIR + ARRAY;
+    check_sorted_reads(
+        array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+  } else if (supports_hdfs_) {
+    // HDFS
+    array_name = HDFS_TEMP_DIR + ARRAY;
+    check_sorted_reads(
+        array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+  } else {
+    // File
+    array_name = FILE_URI_PREFIX + FILE_TEMP_DIR + ARRAY;
+    check_sorted_reads(
+        array_name, TILEDB_FILTER_BZIP2, TILEDB_ROW_MAJOR, TILEDB_COL_MAJOR);
+  }
 }

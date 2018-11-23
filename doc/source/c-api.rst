@@ -25,6 +25,10 @@ Types
     :project: TileDB-C
 .. doxygentypedef:: tiledb_query_t
     :project: TileDB-C
+.. doxygentypedef:: tiledb_filter_t
+    :project: TileDB-C
+.. doxygentypedef:: tiledb_filter_list_t
+    :project: TileDB-C
 .. doxygentypedef:: tiledb_kv_t
     :project: TileDB-C
 .. doxygentypedef:: tiledb_kv_schema_t
@@ -84,11 +88,17 @@ Enumerations
     :project: TileDB-C
 .. doxygenenum:: tiledb_layout_t
     :project: TileDB-C
+.. doxygenenum:: tiledb_filter_type_t
+    :project: TileDB-C
+.. doxygenenum:: tiledb_filter_option_t
+    :project: TileDB-C
 .. doxygenenum:: tiledb_compressor_t
     :project: TileDB-C
 .. doxygenenum:: tiledb_walk_order_t
     :project: TileDB-C
 .. doxygenenum:: tiledb_vfs_mode_t
+    :project: TileDB-C
+.. doxygenenum:: tiledb_encryption_type_t
     :project: TileDB-C
 
 Context
@@ -152,7 +162,17 @@ Array
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_open
     :project: TileDB-C
+.. doxygenfunction:: tiledb_array_open_with_key
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_open_at
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_open_at_with_key
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_array_reopen
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_reopen_at
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_get_timestamp
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_close
     :project: TileDB-C
@@ -160,7 +180,11 @@ Array
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_create
     :project: TileDB-C
+.. doxygenfunction:: tiledb_array_create_with_key
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_array_consolidate
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_consolidate_with_key
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_get_schema
     :project: TileDB-C
@@ -171,6 +195,8 @@ Array
 .. doxygenfunction:: tiledb_array_max_buffer_size
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_max_buffer_size_var
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_get_uri
     :project: TileDB-C
 
 Array Schema
@@ -189,6 +215,10 @@ Array Schema
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_set_tile_order
     :project: TileDB-C
+.. doxygenfunction:: tiledb_array_schema_set_coords_filter_list
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_schema_set_offsets_filter_list
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_set_coords_compressor
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_set_offsets_compressor
@@ -197,11 +227,17 @@ Array Schema
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_load
     :project: TileDB-C
+.. doxygenfunction:: tiledb_array_schema_load_with_key
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_get_array_type
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_get_capacity
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_get_cell_order
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_schema_get_coords_filter_list
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_array_schema_get_offsets_filter_list
     :project: TileDB-C
 .. doxygenfunction:: tiledb_array_schema_get_coords_compressor
     :project: TileDB-C
@@ -226,6 +262,8 @@ Attribute
     :project: TileDB-C
 .. doxygenfunction:: tiledb_attribute_free
     :project: TileDB-C
+.. doxygenfunction:: tiledb_attribute_set_filter_list
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_attribute_set_compressor
     :project: TileDB-C
 .. doxygenfunction:: tiledb_attribute_set_cell_val_num
@@ -233,6 +271,8 @@ Attribute
 .. doxygenfunction:: tiledb_attribute_get_name
     :project: TileDB-C
 .. doxygenfunction:: tiledb_attribute_get_type
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_attribute_get_filter_list
     :project: TileDB-C
 .. doxygenfunction:: tiledb_attribute_get_compressor
     :project: TileDB-C
@@ -289,6 +329,10 @@ Query
     :project: TileDB-C
 .. doxygenfunction:: tiledb_query_set_buffer_var
     :project: TileDB-C
+.. doxygenfunction:: tiledb_query_get_buffer
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_query_get_buffer_var
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_query_set_layout
     :project: TileDB-C
 .. doxygenfunction:: tiledb_query_free
@@ -306,6 +350,36 @@ Query
 .. doxygenfunction:: tiledb_query_has_results
     :project: TileDB-C
 
+Filter
+------
+.. doxygenfunction:: tiledb_filter_alloc
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_free
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_get_type
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_set_option
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_get_option
+    :project: TileDB-C
+
+Filter List
+-----------
+.. doxygenfunction:: tiledb_filter_list_alloc
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_free
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_add_filter
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_set_max_chunk_size
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_get_nfilters
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_get_filter_from_index
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_filter_list_get_max_chunk_size
+    :project: TileDB-C
+
 Group
 -----
 .. doxygenfunction:: tiledb_group_create
@@ -317,13 +391,27 @@ Key-value
     :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_create
     :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_create_with_key
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_consolidate
     :project: TileDB-C
-.. doxygenfunction:: tiledb_kv_set_max_buffered_items
+.. doxygenfunction:: tiledb_kv_consolidate_with_key
     :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_open
     :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_open_with_key
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_open_at
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_open_at_with_key
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_is_open
+    :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_reopen
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_reopen_at
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_get_timestamp
     :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_close
     :project: TileDB-C
@@ -354,6 +442,8 @@ Key-value Schema
 .. doxygenfunction:: tiledb_kv_schema_check
     :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_schema_load
+    :project: TileDB-C
+.. doxygenfunction:: tiledb_kv_schema_load_with_key
     :project: TileDB-C
 .. doxygenfunction:: tiledb_kv_schema_get_attribute_num
     :project: TileDB-C
